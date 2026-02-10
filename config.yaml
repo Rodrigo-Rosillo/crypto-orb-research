@@ -1,0 +1,28 @@
+# Project run configuration (single source of truth)
+
+symbol: SOLUSDT
+timeframe: 30m
+
+timezone:
+  data_timezone: "UTC"          # what timezone your CSV timestamps represent
+  orb_times_timezone: "UTC"     # timezone for the ORB times below (usually same as data_timezone)
+
+orb:
+  start: "13:30"   # HH:MM
+  end: "14:00"     # HH:MM
+  cutoff: "14:00"  # first bar AFTER this time can trigger a signal
+
+adx:
+  period: 14
+  threshold: 43
+
+risk:
+  initial_capital: 10000
+  position_size: 0.95          # fraction of capital used per trade (example)
+
+fees:
+  taker_fee_rate: 0.0005       # 0.05% = 0.0005
+
+leverage:
+  enabled: false
+  max_leverage: 1              # keep 1 if disabled
