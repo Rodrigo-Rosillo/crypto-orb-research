@@ -1,0 +1,378 @@
+{
+  "data_root": "C:/Users/wrodr/Documents/GitHub/crypto-orb-research/data/raw",
+  "dataset_sha256": "152947fcfe56f72be5857445de89dea4c401601e93c734f7e7f57bc822f6e940",
+  "file_count": 61,
+  "files": [
+    {
+      "modified_utc": "2021-06-29T01:59:33+00:00",
+      "path": "SOLUSDT-30m-2021-01.csv",
+      "sha256": "fd912c43a9f9feecc113711a619dde46b70b01cab89e9d5f9abd0709f107c50d",
+      "size_bytes": 151095
+    },
+    {
+      "modified_utc": "2021-03-02T19:57:18+00:00",
+      "path": "SOLUSDT-30m-2021-02.csv",
+      "sha256": "f7422d304cde065dd0277bf191f8d3fb795b678ad182537ca85dd5aa5fd1a78f",
+      "size_bytes": 138463
+    },
+    {
+      "modified_utc": "2021-06-09T14:11:00+00:00",
+      "path": "SOLUSDT-30m-2021-03.csv",
+      "sha256": "3d42431458371d89de7ea5734ec5beff3481b6001dd9ee06caac3b311e82fd5f",
+      "size_bytes": 157030
+    },
+    {
+      "modified_utc": "2021-06-09T10:28:32+00:00",
+      "path": "SOLUSDT-30m-2021-04.csv",
+      "sha256": "0688076302816c48ec028dcdfcda6cf9e0930c97786d0da33cbc955ed6704bd6",
+      "size_bytes": 153877
+    },
+    {
+      "modified_utc": "2021-06-17T19:07:46+00:00",
+      "path": "SOLUSDT-30m-2021-05.csv",
+      "sha256": "3cac8fb298ffcd712d583fd029be060796b4061fc47e3aef5686e398df0b4afc",
+      "size_bytes": 159634
+    },
+    {
+      "modified_utc": "2021-09-12T07:35:14+00:00",
+      "path": "SOLUSDT-30m-2021-06.csv",
+      "sha256": "9a2aef167120c48a4864d84859eb8c79c3a76a68f26feaa8d48d77f4e6179add",
+      "size_bytes": 155567
+    },
+    {
+      "modified_utc": "2021-08-01T20:13:16+00:00",
+      "path": "SOLUSDT-30m-2021-07.csv",
+      "sha256": "778dc33cb4b36f1ead505ca070b04aed2cc9e43e26d61333d1e38130efe05db9",
+      "size_bytes": 158305
+    },
+    {
+      "modified_utc": "2021-09-02T14:28:55+00:00",
+      "path": "SOLUSDT-30m-2021-08.csv",
+      "sha256": "49eebe801a0ada5e58cb78d04d1c3c7b29ff0211d7e81904e1bff21e6f280606",
+      "size_bytes": 161286
+    },
+    {
+      "modified_utc": "2021-10-01T13:12:02+00:00",
+      "path": "SOLUSDT-30m-2021-09.csv",
+      "sha256": "3015ec3ca29b8fa26f2f9b3ffa0ace3c0d1395123aed72e0c0cea1ecd4feb830",
+      "size_bytes": 164903
+    },
+    {
+      "modified_utc": "2021-11-01T14:03:14+00:00",
+      "path": "SOLUSDT-30m-2021-10.csv",
+      "sha256": "ac23cd4f222ebc663b208c2e31dbfabacc4943425e6a7086a8ee12c52b217471",
+      "size_bytes": 168220
+    },
+    {
+      "modified_utc": "2021-12-01T11:02:26+00:00",
+      "path": "SOLUSDT-30m-2021-11.csv",
+      "sha256": "0e852adf9714f95f2bc1ac741ec229ea747c89f10b949c36e5140a6b6a35ee2f",
+      "size_bytes": 161510
+    },
+    {
+      "modified_utc": "2022-01-07T15:15:07+00:00",
+      "path": "SOLUSDT-30m-2021-12.csv",
+      "sha256": "3e9e7f8626dc42d6d3ad064db94bab7e7f92be569a369a9256bedbd98b4e599a",
+      "size_bytes": 166158
+    },
+    {
+      "modified_utc": "2023-12-18T13:20:34+00:00",
+      "path": "SOLUSDT-30m-2022-01.csv",
+      "sha256": "9669492a99ed20ba9b077c5feeee33f37f3faa23f6c39a276961c4d8d144ccbe",
+      "size_bytes": 164133
+    },
+    {
+      "modified_utc": "2024-01-08T11:26:00+00:00",
+      "path": "SOLUSDT-30m-2022-02.csv",
+      "sha256": "a15a17ea7a608392191777a4432bbfcc57fdf9c77ee9e7eedd2df607f8312b9d",
+      "size_bytes": 132432
+    },
+    {
+      "modified_utc": "2022-04-06T12:15:43+00:00",
+      "path": "SOLUSDT-30m-2022-03.csv",
+      "sha256": "6becc919c0ede29ea54bca4af911125e0f5464dbb173b60d2573d8d36efc7fc9",
+      "size_bytes": 162056
+    },
+    {
+      "modified_utc": "2024-01-08T14:11:57+00:00",
+      "path": "SOLUSDT-30m-2022-04.csv",
+      "sha256": "972e0be725ad6bbc9cc61d50e4df8b4f5a14b246e46ce5d72eb33a2d1be2643b",
+      "size_bytes": 149548
+    },
+    {
+      "modified_utc": "2024-08-20T18:03:45+00:00",
+      "path": "SOLUSDT-30m-2022-05.csv",
+      "sha256": "b4cf1a9be3b31147c191ed5b64c997849bd84c881b617e405310f8e43a8c40a8",
+      "size_bytes": 162154
+    },
+    {
+      "modified_utc": "2023-12-20T15:09:26+00:00",
+      "path": "SOLUSDT-30m-2022-06.csv",
+      "sha256": "8bf132e7681c58ae5d7404db03c666827fa7dd2502d45fcb3658d9000576bc7d",
+      "size_bytes": 158532
+    },
+    {
+      "modified_utc": "2023-09-21T06:07:54+00:00",
+      "path": "SOLUSDT-30m-2022-07.csv",
+      "sha256": "f2f5cd17b98dccc4ca18c3bb131adf2f1a77875b6f57bf330f25861f5f98f02a",
+      "size_bytes": 162619
+    },
+    {
+      "modified_utc": "2023-06-12T10:29:51+00:00",
+      "path": "SOLUSDT-30m-2022-08.csv",
+      "sha256": "85974b966037bb242fb5c58e63dbf39bb741c2546b0de7b001cddb1d86aedf20",
+      "size_bytes": 161865
+    },
+    {
+      "modified_utc": "2022-10-26T13:06:03+00:00",
+      "path": "SOLUSDT-30m-2022-09.csv",
+      "sha256": "ac925e672088ca2759382c3e9f21f4517665f0e1951b112cf00c0c1d7dfe597d",
+      "size_bytes": 155794
+    },
+    {
+      "modified_utc": "2022-11-17T17:53:06+00:00",
+      "path": "SOLUSDT-30m-2022-10.csv",
+      "sha256": "6a9a32897443e4091a680eeccbf0f2d986d36398331ab341e67644931608cdf0",
+      "size_bytes": 159756
+    },
+    {
+      "modified_utc": "2022-12-25T19:54:53+00:00",
+      "path": "SOLUSDT-30m-2022-11.csv",
+      "sha256": "d09761a096e4109289490884c054bc72e187c8406509ac436217e84420deb14c",
+      "size_bytes": 157602
+    },
+    {
+      "modified_utc": "2023-01-17T17:13:20+00:00",
+      "path": "SOLUSDT-30m-2022-12.csv",
+      "sha256": "c9f29e8cff5cd510235175d309ad2bfb5d5b613515da22e14855de39915f26fa",
+      "size_bytes": 158287
+    },
+    {
+      "modified_utc": "2023-02-17T15:10:01+00:00",
+      "path": "SOLUSDT-30m-2023-01.csv",
+      "sha256": "72a25ade49a80d9d3f31dd7bad9b458172e6251e89fdfc0ab20dd94a3f0bc1ac",
+      "size_bytes": 163393
+    },
+    {
+      "modified_utc": "2023-09-19T08:33:44+00:00",
+      "path": "SOLUSDT-30m-2023-02.csv",
+      "sha256": "75faa31afd71ff5aac2b9d5203dccd5ae4600648b2d51466e800a27a0d7a3995",
+      "size_bytes": 146230
+    },
+    {
+      "modified_utc": "2023-04-22T16:30:45+00:00",
+      "path": "SOLUSDT-30m-2023-03.csv",
+      "sha256": "c613dac3208c53df37c4a51f0e8eb1faf0e5a3668cf43df4f495458f63374f6c",
+      "size_bytes": 161447
+    },
+    {
+      "modified_utc": "2023-08-07T07:46:59+00:00",
+      "path": "SOLUSDT-30m-2023-04.csv",
+      "sha256": "e23bc1e9483f17a1b93fdad973e1bbebcbd850c34a7630aaeb251c7bd9537cd6",
+      "size_bytes": 155473
+    },
+    {
+      "modified_utc": "2023-06-01T15:50:06+00:00",
+      "path": "SOLUSDT-30m-2023-05.csv",
+      "sha256": "ce98caf99f08ce3e60baafc0d8fa263a0386fb16332f4dfab992274d91e3eff2",
+      "size_bytes": 159943
+    },
+    {
+      "modified_utc": "2023-07-02T13:57:14+00:00",
+      "path": "SOLUSDT-30m-2023-06.csv",
+      "sha256": "a784f5092d6a52a5f38f09ccc1bdf0f68146a077f0fded2709b30f994851b320",
+      "size_bytes": 156152
+    },
+    {
+      "modified_utc": "2023-11-18T12:42:31+00:00",
+      "path": "SOLUSDT-30m-2023-07.csv",
+      "sha256": "61a1e34c10f3b4bce9ffa4ea79df135aecaa2ab0030e1f525aaed78bdd8f00d8",
+      "size_bytes": 162882
+    },
+    {
+      "modified_utc": "2023-11-18T15:07:25+00:00",
+      "path": "SOLUSDT-30m-2023-08.csv",
+      "sha256": "9620a75acfc066036f7dfc111bb58a45e4ff41f2013c93f4e5f4a3562870cffa",
+      "size_bytes": 161107
+    },
+    {
+      "modified_utc": "2023-11-18T15:45:06+00:00",
+      "path": "SOLUSDT-30m-2023-09.csv",
+      "sha256": "802656639c2d551655edfef13f309c28f0c09696a8a65fc6203a8faf86bf5d89",
+      "size_bytes": 155622
+    },
+    {
+      "modified_utc": "2023-11-18T17:46:26+00:00",
+      "path": "SOLUSDT-30m-2023-10.csv",
+      "sha256": "8df94f9c11897d5fc1cf023634dfc21046a615d08a3ca972a78b231510afeeda",
+      "size_bytes": 162853
+    },
+    {
+      "modified_utc": "2023-12-17T13:09:40+00:00",
+      "path": "SOLUSDT-30m-2023-11.csv",
+      "sha256": "2550c8273de379f3719c2f182e098147e7cf8c2c013ef3be3b308a1c78552160",
+      "size_bytes": 159179
+    },
+    {
+      "modified_utc": "2024-01-02T05:14:09+00:00",
+      "path": "SOLUSDT-30m-2023-12.csv",
+      "sha256": "b617f919e0c9c99f66a9413d50431d27da9fae7888e8bccae7939e534c53d6df",
+      "size_bytes": 165900
+    },
+    {
+      "modified_utc": "2024-02-18T13:29:55+00:00",
+      "path": "SOLUSDT-30m-2024-01.csv",
+      "sha256": "f00b3cccebe12253f16813c30242ad38d11fcae3b3b1a568c4e0d3938131bd16",
+      "size_bytes": 165809
+    },
+    {
+      "modified_utc": "2024-03-17T14:38:12+00:00",
+      "path": "SOLUSDT-30m-2024-02.csv",
+      "sha256": "9c648a1be361391fdc13d33925e0e98f5dfbc2dd9fcb5a5e80410284ec2b63e5",
+      "size_bytes": 157572
+    },
+    {
+      "modified_utc": "2024-04-17T16:02:03+00:00",
+      "path": "SOLUSDT-30m-2024-03.csv",
+      "sha256": "f6d20b40bd58a01c4c520e6e55ec5f3b877b63ef33f68238e9bcf792a10ebb35",
+      "size_bytes": 170836
+    },
+    {
+      "modified_utc": "2024-05-17T13:54:04+00:00",
+      "path": "SOLUSDT-30m-2024-04.csv",
+      "sha256": "6af4ff3f0ce9434e24b46fa52714f65169578c89f89b15653e092aa17464895e",
+      "size_bytes": 164502
+    },
+    {
+      "modified_utc": "2024-06-17T13:19:59+00:00",
+      "path": "SOLUSDT-30m-2024-05.csv",
+      "sha256": "72db83a2b24079997aa9eabb758e568db562a15d1d3f5f7ae4fc98ca6f705cdc",
+      "size_bytes": 169166
+    },
+    {
+      "modified_utc": "2024-07-17T13:28:49+00:00",
+      "path": "SOLUSDT-30m-2024-06.csv",
+      "sha256": "c0d86eaabde189c7a6d7b3f22570648e50ff48b14a4f96b0497eca658d3a9166",
+      "size_bytes": 162681
+    },
+    {
+      "modified_utc": "2024-08-17T13:11:30+00:00",
+      "path": "SOLUSDT-30m-2024-07.csv",
+      "sha256": "1be70692f5e2f2a1e2bd5790727e7fa1a6d4fd5954968de85c438c0b4d9678c2",
+      "size_bytes": 169250
+    },
+    {
+      "modified_utc": "2024-09-17T13:14:54+00:00",
+      "path": "SOLUSDT-30m-2024-08.csv",
+      "sha256": "300dec427eb258764ed151fa899ff759f5bf0c7371733750210a07a1700f6909",
+      "size_bytes": 169738
+    },
+    {
+      "modified_utc": "2024-10-17T13:27:19+00:00",
+      "path": "SOLUSDT-30m-2024-09.csv",
+      "sha256": "c5656ea51f1f9902b41402ddef36e4663db53a84a6f1b14adfc0e82d9de55df4",
+      "size_bytes": 163596
+    },
+    {
+      "modified_utc": "2024-11-21T21:39:13+00:00",
+      "path": "SOLUSDT-30m-2024-10.csv",
+      "sha256": "ea3372787bed1b4dd360d1234e82dad510615bc741bbe7d0f3e9d49cc630abcc",
+      "size_bytes": 168755
+    },
+    {
+      "modified_utc": "2024-12-17T13:21:10+00:00",
+      "path": "SOLUSDT-30m-2024-11.csv",
+      "sha256": "57722a88aadfeb7f95128b6768b0dead4c7d319536d25f000823b690f9f019ef",
+      "size_bytes": 164487
+    },
+    {
+      "modified_utc": "2025-01-17T13:11:06+00:00",
+      "path": "SOLUSDT-30m-2024-12.csv",
+      "sha256": "d903ad509dec752f584a584bfbdc0dc86e5ae9ee6d1d1ed4a50160178c7d2b39",
+      "size_bytes": 169490
+    },
+    {
+      "modified_utc": "2025-02-17T13:13:13+00:00",
+      "path": "SOLUSDT-30m-2025-01.csv",
+      "sha256": "fae6777ad2e9f5cc3cb6a031cf79d0d92109c24c82df25facc5f49944dd54c92",
+      "size_bytes": 169973
+    },
+    {
+      "modified_utc": "2025-03-17T13:15:18+00:00",
+      "path": "SOLUSDT-30m-2025-02.csv",
+      "sha256": "3a95ca0e6c28db8f7c459aa3ddef19d0d03655a72df781673992d051f5d5f1be",
+      "size_bytes": 153530
+    },
+    {
+      "modified_utc": "2025-04-17T13:22:34+00:00",
+      "path": "SOLUSDT-30m-2025-03.csv",
+      "sha256": "bf746911f535fd28687df3eb459dea3f3341a89121e1b3430752a3efef576ea0",
+      "size_bytes": 169870
+    },
+    {
+      "modified_utc": "2025-05-17T13:27:46+00:00",
+      "path": "SOLUSDT-30m-2025-04.csv",
+      "sha256": "bb32e8b774c608b847f876f564f7e1b924187d66140d57eee261b454b2343e14",
+      "size_bytes": 175089
+    },
+    {
+      "modified_utc": "2025-06-02T08:03:55+00:00",
+      "path": "SOLUSDT-30m-2025-05.csv",
+      "sha256": "e2a4ce3ba793ff2566995f8bf5e238aa393cb5b9664d67af89aad5c0a50b8e86",
+      "size_bytes": 184877
+    },
+    {
+      "modified_utc": "2025-07-17T13:46:30+00:00",
+      "path": "SOLUSDT-30m-2025-06.csv",
+      "sha256": "365e1432919388dc521f289b0d45874abf39a45745f5c47fdcfe0b4e9c10cd8b",
+      "size_bytes": 178810
+    },
+    {
+      "modified_utc": "2025-08-02T08:31:35+00:00",
+      "path": "SOLUSDT-30m-2025-07.csv",
+      "sha256": "84ce6b2c71c607766c30068d618f02e2c32e2fd4ac874ca1b56e48cd7141dae1",
+      "size_bytes": 185106
+    },
+    {
+      "modified_utc": "2025-09-02T09:59:14+00:00",
+      "path": "SOLUSDT-30m-2025-08.csv",
+      "sha256": "c52dc634ee9487540fa40b718dfde8f0b2672817b9ee7ef0295fa13c82379d29",
+      "size_bytes": 185889
+    },
+    {
+      "modified_utc": "2025-10-02T08:36:50+00:00",
+      "path": "SOLUSDT-30m-2025-09.csv",
+      "sha256": "ddcd53b0a7e94524d390e3096f30358ac471fd4ac1a5c02f97b47a9c112a237d",
+      "size_bytes": 179561
+    },
+    {
+      "modified_utc": "2025-11-02T08:38:15+00:00",
+      "path": "SOLUSDT-30m-2025-10.csv",
+      "sha256": "84da289351581c006a2cfe6eb8d4851788d49cf25ac0b3fb0d45bddcd3b36c6d",
+      "size_bytes": 185855
+    },
+    {
+      "modified_utc": "2025-12-02T08:49:28+00:00",
+      "path": "SOLUSDT-30m-2025-11.csv",
+      "sha256": "0d0db1a1e105e91f1a4172f234984bd756969f2af261c1fb72e2882922ba871d",
+      "size_bytes": 179291
+    },
+    {
+      "modified_utc": "2026-01-02T09:32:47+00:00",
+      "path": "SOLUSDT-30m-2025-12.csv",
+      "sha256": "41d7260d9b3bd45d6d6fab5b183d7b6c8dcf416c1eff9538515139fb42f9e90a",
+      "size_bytes": 184403
+    },
+    {
+      "modified_utc": "2026-02-02T09:35:48+00:00",
+      "path": "SOLUSDT-30m-2026-01.csv",
+      "sha256": "9d8b8f03034c6c417339e4ef498d6eed0869a7c2d4602964895550c3c2e17425",
+      "size_bytes": 184194
+    }
+  ],
+  "generated_utc": "2026-02-10T03:00:39.975900+00:00",
+  "include_globs": [
+    "*.csv"
+  ],
+  "schema_version": 1
+}
