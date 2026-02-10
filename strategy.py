@@ -181,19 +181,22 @@ def generate_orb_signals(
             if pd.isna(adx) or adx < adx_threshold:
                 continue
 
-            if trend == "uptrend" and close < orb_low:
-                out.at[idx, "signal"] = 1
-                out.at[idx, "signal_type"] = "uptrend_reversion"
-                break
+            # --- DISABLED RULE #1: uptrend_reversion ---
+            # if trend == "uptrend" and close < orb_low:
+            #     out.at[idx, "signal"] = 1
+            #     out.at[idx, "signal_type"] = "uptrend_reversion"
+            #     break
 
+            # --- KEEP ONLY THIS RULE: downtrend_breakdown ---
             if trend == "downtrend" and close < orb_low:
                 out.at[idx, "signal"] = -1
                 out.at[idx, "signal_type"] = "downtrend_breakdown"
                 break
 
-            if trend == "downtrend" and close > orb_high:
-                out.at[idx, "signal"] = -2
-                out.at[idx, "signal_type"] = "downtrend_reversion"
-                break
+            # --- DISABLED RULE #3: downtrend_reversion ---
+            # if trend == "downtrend" and close > orb_high:
+            #     out.at[idx, "signal"] = -2
+            #     out.at[idx, "signal_type"] = "downtrend_reversion"
+            #     break
 
     return out
