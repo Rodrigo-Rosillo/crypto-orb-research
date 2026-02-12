@@ -1,50 +1,37 @@
-from __future__ import annotations
-
 import os
 
-# Determinism locks (best-effort; for full effect also run with PYTHONHASHSEED=0 in your shell)
-os.environ.setdefault("PYTHONHASHSEED", "0")
+# Determinism locks (must be set before Python does much work)
+os.environ["PYTHONHASHSEED"] = "0"
 
-import random
+import argparse
 import hashlib
 import json
 import platform
+import random
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone, time as dtime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
 import yaml
 
+# Determinism: RNG seeds
 random.seed(0)
 np.random.seed(0)
 
-# Ensure repo root is importable when running `python scripts/run_baseline.py`
+# Ensure repo root is importable when running: python scripts/run_baseline.py
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
 
 
-# ----------------------------
-# Outputs (kept from your stub)
-# ----------------------------
-OUT_DIR = REPO_ROOT / "reports" / "baseline"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-results_path = OUT_DIR / "results.json"
-plot_path = OUT_DIR / "equity_curve.png"  # only created if --plot is passed
-
-
-# ----------------------------
-# Helpers
-# ----------------------------
 def stable_json(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False, indent=2)
 
 
 def sha256_bytes(b: bytes) -> str:
@@ -59,87 +46,90 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return h.hexdigest()
 
 
-def parse_hhmm(s: str) -> dtime:
-    hh, mm = s.split(":")
-    return dtime(int(hh), int(mm))
+def parse_hhmm(s: str):
+    hh, mm = s.strip().split(":")
+    return datetime(2000, 1, 1, int(hh), int(mm)).time()
 
 
-def get_git_commit_hash(repo_root: Path) -> Optional[str]:
-    try:
-        out = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(repo_root), stderr=subprocess.DEVNULL)
-        return out.decode().strip()
-    except Exception:
-        return None
+def parse_timeframe_to_minutes(tf: str) -> int:
+    tf = tf.strip().lower()
+    if tf.endswith("m"):
+        return int(tf[:-1])
+    if tf.endswith("h"):
+        return int(tf[:-1]) * 60
+    if tf.endswith("d"):
+        return int(tf[:-1]) * 60 * 24
+    raise ValueError(f"Unsupported timeframe: {tf}. Use like '30m', '1h', '1d'.")
 
 
-def get_pip_freeze() -> Optional[str]:
-    try:
-        out = subprocess.check_output([sys.executable, "-m", "pip", "freeze"], stderr=subprocess.DEVNULL)
-        return out.decode()
-    except Exception:
-        return None
-
-
-# ----------------------------
-# Data loading
-# ----------------------------
-def read_binance_csv(file_path: Path) -> pd.DataFrame:
+def load_valid_days_csv(path: Path) -> set:
     """
-    Reads Binance kline CSV where first column is ms timestamp.
-    Assumes the standard 12-column format.
+    Returns a set of datetime.date objects (UTC days) that are valid.
+    valid_days.csv must include a 'date_utc' column like '2025-01-01'.
     """
-    column_names = [
-        "timestamp",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "close_time",
-        "quote_asset_volume",
-        "number_of_trades",
-        "taker_buy_base_asset_volume",
-        "taker_buy_quote_asset_volume",
-        "ignore",
-    ]
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Valid days file not found: {path}. Run: python scripts/build_parquet.py"
+        )
+    vdf = pd.read_csv(path)
+    if "date_utc" not in vdf.columns:
+        raise ValueError(f"{path} must contain a 'date_utc' column")
+    return set(pd.to_datetime(vdf["date_utc"], utc=True).dt.date)
 
-    df = pd.read_csv(file_path, names=column_names, header=None, skiprows=1)
 
-    # Treat ms epoch as UTC; keep tz-aware for correct .index.time in UTC
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+def read_binance_ohlcv(file_path: Path) -> pd.DataFrame:
+    """
+    Reads Binance kline CSV, using only the first 6 columns:
+      open_time(ms), open, high, low, close, volume
+    Assumes there is a header row to skip (as in your raw exports).
+    Returns a DF indexed by UTC timestamp with columns: open, high, low, close, volume.
+    """
+    df = pd.read_csv(
+        file_path,
+        header=None,
+        skiprows=1,
+        usecols=[0, 1, 2, 3, 4, 5],
+        names=["timestamp", "open", "high", "low", "close", "volume"],
+    )
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True, errors="coerce")
+    df = df.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
 
-    numeric_cols = [
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "quote_asset_volume",
-        "taker_buy_base_asset_volume",
-        "taker_buy_quote_asset_volume",
-    ]
-    for col in numeric_cols:
-        df[col] = df[col].astype(float)
+    for c in ["open", "high", "low", "close", "volume"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    df["number_of_trades"] = df["number_of_trades"].astype(int)
-    df = df.drop(columns=["ignore"])
-    df = df.set_index("timestamp")
+    df = df.dropna(subset=["open", "high", "low", "close"])
+    df = df[~df.index.duplicated(keep="first")]
     return df
 
 
-def load_dataset_from_manifest(
-    data_dir: Path,
-    manifest: Dict[str, Any],
+def load_raw_dataset_from_manifest(
+    manifest_path: Path,
+    data_dir_override: Optional[Path],
     symbol: str,
     timeframe: str,
-) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    Loads only files matching {symbol}-{timeframe}-*.csv if present, else all manifest files.
-    Returns (df, used_paths).
-    """
+) -> Tuple[pd.DataFrame, Dict[str, Any], Path, List[str]]:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    data_root = manifest.get("data_root", "")
+
+    if data_dir_override is not None:
+        data_dir = data_dir_override
+    else:
+        # If manifest has relative path, interpret relative to repo root
+        data_dir = Path(str(data_root))
+        if not data_dir.is_absolute():
+            data_dir = (REPO_ROOT / data_dir).resolve()
+
+    if not data_dir.exists():
+        raise FileNotFoundError(f"Raw data directory not found: {data_dir}")
+
     files = manifest.get("files", [])
-    file_paths = [f.get("path") for f in files if isinstance(f, dict) and isinstance(f.get("path"), str)]
-    file_paths = [p for p in file_paths if p.lower().endswith(".csv")]
+    file_paths = [
+        f.get("path")
+        for f in files
+        if isinstance(f, dict)
+        and isinstance(f.get("path"), str)
+        and f.get("path", "").lower().endswith(".csv")
+    ]
 
     prefix = f"{symbol}-{timeframe}-"
     selected = [p for p in file_paths if p.startswith(prefix)]
@@ -147,32 +137,36 @@ def load_dataset_from_manifest(
         selected = file_paths
 
     selected = sorted(selected, key=lambda x: x.lower())
-    dfs = [read_binance_csv(data_dir / p) for p in selected]
+    if not selected:
+        raise RuntimeError("No CSV files found in manifest.")
+
+    dfs = []
+    for rel in selected:
+        fp = data_dir / rel
+        if not fp.exists():
+            raise FileNotFoundError(f"Missing file listed in manifest: {fp}")
+        dfs.append(read_binance_ohlcv(fp))
 
     df = pd.concat(dfs).sort_index()
     df = df[~df.index.duplicated(keep="first")]
-    return df, selected
+    return df, manifest, data_dir, selected
 
 
-def load_dataset_fallback_all_csvs(data_dir: Path) -> Tuple[pd.DataFrame, List[str]]:
-    csvs = sorted([p for p in data_dir.glob("*.csv")])
-    if not csvs:
-        raise FileNotFoundError(f"No .csv files found in {data_dir}")
-    dfs = [read_binance_csv(p) for p in csvs]
-    df = pd.concat(dfs).sort_index()
-    df = df[~df.index.duplicated(keep="first")]
-    return df, [p.name for p in csvs]
+def compute_max_drawdown_pct(equity: pd.Series) -> float:
+    if equity.empty:
+        return 0.0
+    roll_max = equity.cummax()
+    dd = (equity / roll_max) - 1.0
+    return float(dd.min() * 100.0)
 
 
-# ----------------------------
-# Backtest + metrics (Phase 0 allowed inside runner)
-# ----------------------------
 def backtest_orb_strategy(
     df: pd.DataFrame,
     orb_ranges: pd.DataFrame,
     initial_capital: float = 10000,
     position_size: float = 0.95,
     taker_fee_rate: float = 0.0005,
+    valid_days: Optional[set] = None,
 ) -> Tuple[List[Dict[str, Any]], List[float], float, float]:
     """
     Next-candle-open execution:
@@ -180,9 +174,13 @@ def backtest_orb_strategy(
     - Entry executes at next candle open (bar i+1).
     - Pending entries ARE allowed to execute on the next UTC day (00:00 or later).
     - When executing a pending entry, ORB levels are taken from the signal day (pending_date).
-    - TP/SL logic is evaluated using candle high/low after entry.
-    - If both TP and SL occur in the same candle, SL is checked first (conservative).
+    - Enforces valid day policy:
+        * scheduling only on valid signal days
+        * execution only if both signal day and execution day are valid
+    - TP/SL evaluated using candle high/low after entry (stop checked first).
     """
+    valid_days = valid_days or set()
+
     capital = float(initial_capital)
     position = 0.0
     entry_price = 0.0
@@ -192,12 +190,12 @@ def backtest_orb_strategy(
     equity_curve: List[float] = []
     total_fees_paid = 0.0
 
-    # Pending order state (created at bar close, executed next bar open)
+    # Pending order state
     pending_signal: int = 0
     pending_signal_type: str = ""
-    pending_date = None  # date of the bar where the signal occurred
+    pending_date = None  # UTC day (python date) where the signal occurred
 
-    # Trade state variables (set when position opens)
+    # Trade state vars
     entry_time = None
     entry_signal_type = ""
     entry_fee = 0.0
@@ -208,17 +206,18 @@ def backtest_orb_strategy(
         bar_high = float(df["high"].iloc[i])
         bar_low = float(df["low"].iloc[i])
 
-        current_date = df["date"].iloc[i]
+        current_date = df["date"].iloc[i]  # python date
         signal = int(df["signal"].iloc[i])
         signal_type = str(df["signal_type"].iloc[i])
 
-        # ---------------------------------------------------------
-        # 1) Execute pending entry at *this* candle open (if any)
-        # ---------------------------------------------------------
+        # 1) Execute pending entry at this bar open (if any)
         if position == 0.0 and pending_signal != 0:
-            # Allow execution even if current_date != pending_date (00:00+ next day allowed)
-            # Still use ORB levels from the signal day (pending_date)
-            if pending_date in orb_ranges.index and capital > 0:
+            if (
+                pending_date in orb_ranges.index
+                and capital > 0
+                and pending_date in valid_days
+                and current_date in valid_days
+            ):
                 orb_high = float(orb_ranges.loc[pending_date, "orb_high"])
                 orb_low = float(orb_ranges.loc[pending_date, "orb_low"])
 
@@ -231,7 +230,7 @@ def backtest_orb_strategy(
                 entry_signal_type = pending_signal_type
 
                 if pending_signal == 1:
-                    # LONG (uptrend_reversion) - may be disabled in your rule set
+                    # LONG (uptrend_reversion)
                     position = (notional_value - entry_fee) / entry_price
                     capital -= notional_value
 
@@ -248,7 +247,7 @@ def backtest_orb_strategy(
                     stop_loss = orb_high
 
                 elif pending_signal == -2:
-                    # SHORT (downtrend_reversion) - may be disabled in your rule set
+                    # SHORT (downtrend_reversion)
                     position = -((notional_value - entry_fee) / entry_price)
                     capital -= notional_value
 
@@ -256,14 +255,12 @@ def backtest_orb_strategy(
                     pct_to_target = (entry_price - target_price) / entry_price
                     stop_loss = entry_price * (1 + pct_to_target)
 
-            # Clear pending either way (never keep pending beyond the execution bar)
+            # Clear pending either way
             pending_signal = 0
             pending_signal_type = ""
             pending_date = None
 
-        # ---------------------------------------------------------
-        # 2) Manage open position using this candle high/low
-        # ---------------------------------------------------------
+        # 2) Manage open position
         if position != 0.0:
             # LONG
             if position > 0.0:
@@ -286,13 +283,13 @@ def backtest_orb_strategy(
                             "exit_price": exit_price,
                             "target_price": target_price,
                             "stop_loss": stop_loss,
-                            "position": position,
-                            "pnl": net_pnl,
-                            "gross_pnl": gross_pnl,
-                            "entry_fee": entry_fee,
-                            "exit_fee": exit_fee,
-                            "total_fees": entry_fee + exit_fee,
-                            "return": net_pnl / (entry_price * position) * 100,
+                            "position": float(position),
+                            "pnl": float(net_pnl),
+                            "gross_pnl": float(gross_pnl),
+                            "entry_fee": float(entry_fee),
+                            "exit_fee": float(exit_fee),
+                            "total_fees": float(entry_fee + exit_fee),
+                            "return": float(net_pnl / (entry_price * position) * 100.0),
                             "exit_reason": "stop_loss",
                         }
                     )
@@ -317,13 +314,13 @@ def backtest_orb_strategy(
                             "exit_price": exit_price,
                             "target_price": target_price,
                             "stop_loss": stop_loss,
-                            "position": position,
-                            "pnl": net_pnl,
-                            "gross_pnl": gross_pnl,
-                            "entry_fee": entry_fee,
-                            "exit_fee": exit_fee,
-                            "total_fees": entry_fee + exit_fee,
-                            "return": net_pnl / (entry_price * position) * 100,
+                            "position": float(position),
+                            "pnl": float(net_pnl),
+                            "gross_pnl": float(gross_pnl),
+                            "entry_fee": float(entry_fee),
+                            "exit_fee": float(exit_fee),
+                            "total_fees": float(entry_fee + exit_fee),
+                            "return": float(net_pnl / (entry_price * position) * 100.0),
                             "exit_reason": "target",
                         }
                     )
@@ -350,13 +347,13 @@ def backtest_orb_strategy(
                             "exit_price": exit_price,
                             "target_price": target_price,
                             "stop_loss": stop_loss,
-                            "position": abs(position),
-                            "pnl": net_pnl,
-                            "gross_pnl": gross_pnl,
-                            "entry_fee": entry_fee,
-                            "exit_fee": exit_fee,
-                            "total_fees": entry_fee + exit_fee,
-                            "return": net_pnl / (entry_price * abs(position)) * 100,
+                            "position": float(abs(position)),
+                            "pnl": float(net_pnl),
+                            "gross_pnl": float(gross_pnl),
+                            "entry_fee": float(entry_fee),
+                            "exit_fee": float(exit_fee),
+                            "total_fees": float(entry_fee + exit_fee),
+                            "return": float(net_pnl / (entry_price * abs(position)) * 100.0),
                             "exit_reason": "stop_loss",
                         }
                     )
@@ -381,33 +378,26 @@ def backtest_orb_strategy(
                             "exit_price": exit_price,
                             "target_price": target_price,
                             "stop_loss": stop_loss,
-                            "position": abs(position),
-                            "pnl": net_pnl,
-                            "gross_pnl": gross_pnl,
-                            "entry_fee": entry_fee,
-                            "exit_fee": exit_fee,
-                            "total_fees": entry_fee + exit_fee,
-                            "return": net_pnl / (entry_price * abs(position)) * 100,
+                            "position": float(abs(position)),
+                            "pnl": float(net_pnl),
+                            "gross_pnl": float(gross_pnl),
+                            "entry_fee": float(entry_fee),
+                            "exit_fee": float(exit_fee),
+                            "total_fees": float(entry_fee + exit_fee),
+                            "return": float(net_pnl / (entry_price * abs(position)) * 100.0),
                             "exit_reason": "target",
                         }
                     )
                     position = 0.0
 
-        # ---------------------------------------------------------
-        # 3) If flat, schedule a pending order from this bar’s signal
-        # ---------------------------------------------------------
-        if position == 0.0 and signal != 0 and capital > 0:
-            # schedule entry for next bar open (i+1)
+        # 3) If flat, schedule pending order from this bar’s signal
+        if position == 0.0 and signal != 0 and capital > 0 and current_date in valid_days:
             if i + 1 < len(df):
-                # Allow pending entry even if next candle is next UTC day
-                if current_date in orb_ranges.index:
-                    pending_signal = signal
-                    pending_signal_type = signal_type
-                    pending_date = current_date
+                pending_signal = signal
+                pending_signal_type = signal_type
+                pending_date = current_date
 
-        # ---------------------------------------------------------
-        # 4) Mark-to-market equity on bar close (deterministic)
-        # ---------------------------------------------------------
+        # 4) Mark-to-market equity on bar close
         if position > 0:
             current_equity = capital + (position * bar_close)
         elif position < 0:
@@ -422,7 +412,7 @@ def backtest_orb_strategy(
     # Close at end (last bar close)
     if position != 0.0:
         last_close = float(df["close"].iloc[-1])
-        if position > 0:
+        if position > 0.0:
             exit_fee = last_close * position * taker_fee_rate
             total_fees_paid += exit_fee
 
@@ -440,13 +430,13 @@ def backtest_orb_strategy(
                     "exit_price": last_close,
                     "target_price": target_price,
                     "stop_loss": stop_loss,
-                    "position": position,
-                    "pnl": net_pnl,
-                    "gross_pnl": gross_pnl,
-                    "entry_fee": entry_fee,
-                    "exit_fee": exit_fee,
-                    "total_fees": entry_fee + exit_fee,
-                    "return": net_pnl / (entry_price * position) * 100,
+                    "position": float(position),
+                    "pnl": float(net_pnl),
+                    "gross_pnl": float(gross_pnl),
+                    "entry_fee": float(entry_fee),
+                    "exit_fee": float(exit_fee),
+                    "total_fees": float(entry_fee + exit_fee),
+                    "return": float(net_pnl / (entry_price * position) * 100.0),
                     "exit_reason": "end",
                 }
             )
@@ -468,13 +458,13 @@ def backtest_orb_strategy(
                     "exit_price": last_close,
                     "target_price": target_price,
                     "stop_loss": stop_loss,
-                    "position": abs(position),
-                    "pnl": net_pnl,
-                    "gross_pnl": gross_pnl,
-                    "entry_fee": entry_fee,
-                    "exit_fee": exit_fee,
-                    "total_fees": entry_fee + exit_fee,
-                    "return": net_pnl / (entry_price * abs(position)) * 100,
+                    "position": float(abs(position)),
+                    "pnl": float(net_pnl),
+                    "gross_pnl": float(gross_pnl),
+                    "entry_fee": float(entry_fee),
+                    "exit_fee": float(exit_fee),
+                    "total_fees": float(entry_fee + exit_fee),
+                    "return": float(net_pnl / (entry_price * abs(position)) * 100.0),
                     "exit_reason": "end",
                 }
             )
@@ -482,93 +472,44 @@ def backtest_orb_strategy(
     return trades, equity_curve, float(capital), float(total_fees_paid)
 
 
-def calculate_metrics(
-    trades: List[Dict[str, Any]],
-    equity_curve: List[float],
-    initial_capital: float,
-    final_capital: float,
-    total_fees_paid: float,
-) -> Tuple[Dict[str, Any], pd.DataFrame, pd.Series]:
-    trades_df = pd.DataFrame(trades) if trades else pd.DataFrame()
+def get_git_info() -> Dict[str, Any]:
+    def run(cmd: List[str]) -> str:
+        return subprocess.check_output(cmd, cwd=str(REPO_ROOT), stderr=subprocess.DEVNULL).decode().strip()
 
-    total_trades = int(len(trades_df))
-    winning_trades = int((trades_df["pnl"] > 0).sum()) if total_trades else 0
-    losing_trades = total_trades - winning_trades
-    win_rate = (winning_trades / total_trades * 100) if total_trades else 0.0
-
-    total_return = ((final_capital - initial_capital) / initial_capital) * 100.0
-    total_pnl = float(trades_df["pnl"].sum()) if total_trades else 0.0
-    total_gross_pnl = float(trades_df["gross_pnl"].sum()) if total_trades else 0.0
-    fee_impact_on_pnl = total_gross_pnl - total_pnl
-
-    avg_return = float(trades_df["return"].mean()) if total_trades else 0.0
-    avg_win = float(trades_df.loc[trades_df["pnl"] > 0, "pnl"].mean()) if winning_trades else 0.0
-    avg_loss = float(trades_df.loc[trades_df["pnl"] <= 0, "pnl"].mean()) if losing_trades else 0.0
-
-    avg_fees_per_trade = float(trades_df["total_fees"].mean()) if total_trades else 0.0
-    fees_as_pct_of_capital = (total_fees_paid / initial_capital) * 100.0
-
-    # Drawdown
-    equity_series = pd.Series(equity_curve, dtype=float)
-    rolling_max = equity_series.expanding().max()
-    drawdown = (equity_series - rolling_max) / rolling_max * 100.0
-    max_drawdown = float(drawdown.min()) if len(drawdown) else 0.0
-
-    signal_types = trades_df["signal_type"].value_counts() if total_trades else pd.Series(dtype=int)
-
-    metrics = {
-        "Initial Capital": float(initial_capital),
-        "Final Capital": float(final_capital),
-        "Total Return %": float(total_return),
-        "Total P&L Net": float(total_pnl),
-        "Total P&L Gross": float(total_gross_pnl),
-        "Total Fees Paid": float(total_fees_paid),
-        "Avg Fees/Trade": float(avg_fees_per_trade),
-        "Fees % of Capital": float(fees_as_pct_of_capital),
-        "Fee Impact on P&L": float(fee_impact_on_pnl),
-        "Total Trades": int(total_trades),
-        "Winning Trades": int(winning_trades),
-        "Losing Trades": int(losing_trades),
-        "Win Rate %": float(win_rate),
-        "Average Return %": float(avg_return),
-        "Average Win": float(avg_win),
-        "Average Loss": float(avg_loss),
-        "Max Drawdown %": float(max_drawdown),
-    }
-    return metrics, trades_df, signal_types
+    info: Dict[str, Any] = {}
+    try:
+        info["commit"] = run(["git", "rev-parse", "HEAD"])
+        info["branch"] = run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+        porcelain = run(["git", "status", "--porcelain"])
+        info["dirty"] = bool(porcelain)
+    except Exception:
+        info["commit"] = None
+        info["branch"] = None
+        info["dirty"] = None
+    return info
 
 
-# ----------------------------
-# Run metadata
-# ----------------------------
-@dataclass(frozen=True)
-class RunMetadata:
-    created_at_utc: str
-    git_commit: Optional[str]
-    config_sha256: str
-    manifest_sha256: Optional[str]
-    dataset_sha256: Optional[str]
-    data_dir: str
-    python_version: str
-    platform: str
-    packages_freeze: Optional[str]
-    argv: List[str]
-    used_files: List[str]
+def maybe_write_equity_plot(equity_df: pd.DataFrame, out_path: Path) -> None:
+    try:
+        import matplotlib.pyplot as plt  # type: ignore
+    except Exception:
+        return
+
+    plt.figure()
+    plt.plot(equity_df["timestamp"], equity_df["equity"])
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
 
 
 def main() -> int:
-    import argparse
-
-    ap = argparse.ArgumentParser(description="Frozen baseline runner")
+    ap = argparse.ArgumentParser(description="Run baseline ORB backtest (deterministic)")
     ap.add_argument("--config", default="config.yaml", help="Path to config.yaml (relative to repo root by default)")
-    ap.add_argument("--manifest", default="data/manifest.json", help="Path to manifest.json (relative to repo root)")
-    ap.add_argument(
-        "--data-dir",
-        default=os.getenv("DATA_DIR", ""),
-        help="Directory with Binance CSVs (overrides manifest.data_root). Or set DATA_DIR.",
-    )
-    ap.add_argument("--include-packages", action="store_true", help="Include pip freeze in run_metadata.json")
-    ap.add_argument("--plot", action="store_true", help="Also write equity_curve.png (can vary across matplotlib versions)")
+    ap.add_argument("--manifest", default="data/manifest.json", help="Path to raw manifest.json")
+    ap.add_argument("--data-dir", default="", help="Override raw data directory (otherwise uses manifest.data_root)")
+    ap.add_argument("--valid-days", default="data/processed/valid_days.csv", help="Path to valid_days.csv")
+    ap.add_argument("--out-dir", default="reports/baseline", help="Output directory")
     args = ap.parse_args()
 
     config_path = Path(args.config)
@@ -579,149 +520,215 @@ def main() -> int:
     if not manifest_path.is_absolute():
         manifest_path = (REPO_ROOT / manifest_path).resolve()
 
-    raw_cfg_text = config_path.read_text(encoding="utf-8")
-    cfg = yaml.safe_load(raw_cfg_text) or {}
-    config_hash = sha256_bytes(raw_cfg_text.encode("utf-8"))
+    data_dir_override = Path(args.data_dir).resolve() if args.data_dir else None
+
+    valid_days_path = Path(args.valid_days)
+    if not valid_days_path.is_absolute():
+        valid_days_path = (REPO_ROOT / valid_days_path).resolve()
+
+    out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = (REPO_ROOT / out_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load config
+    cfg_text = config_path.read_text(encoding="utf-8")
+    cfg = yaml.safe_load(cfg_text) or {}
 
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
 
-    orb_cfg = cfg.get("orb", {}) or {}
-    orb_start = parse_hhmm(str(orb_cfg.get("start", "13:30")))
-    orb_end = parse_hhmm(str(orb_cfg.get("end", "14:00")))
-    orb_cutoff = parse_hhmm(str(orb_cfg.get("cutoff", "14:00")))
+    orb_start = parse_hhmm(cfg["orb"]["start"])
+    orb_end = parse_hhmm(cfg["orb"]["end"])
+    orb_cutoff = parse_hhmm(cfg["orb"]["cutoff"])
 
-    adx_cfg = cfg.get("adx", {}) or {}
-    adx_period = int(adx_cfg.get("period", 14))
-    adx_threshold = float(adx_cfg.get("threshold", 43))
+    adx_period = int(cfg["adx"]["period"])
+    adx_threshold = float(cfg["adx"]["threshold"])
 
-    risk_cfg = cfg.get("risk", {}) or {}
-    initial_capital = float(risk_cfg.get("initial_capital", 10000))
-    position_size = float(risk_cfg.get("position_size", 0.95))
+    initial_capital = float(cfg["risk"]["initial_capital"])
+    position_size = float(cfg["risk"]["position_size"])
+    taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
 
-    fees_cfg = cfg.get("fees", {}) or {}
-    taker_fee_rate = float(fees_cfg.get("taker_fee_rate", 0.0005))
-
-    # Determine data_dir: arg/env overrides manifest
-    manifest_obj: Optional[Dict[str, Any]] = None
-    dataset_sha256: Optional[str] = None
-    manifest_sha256: Optional[str] = None
-
-    if manifest_path.exists():
-        manifest_obj = json.loads(manifest_path.read_text(encoding="utf-8"))
-        dataset_sha256 = manifest_obj.get("dataset_sha256")
-        manifest_sha256 = sha256_file(manifest_path)
-
-    data_dir = Path(args.data_dir).resolve() if args.data_dir else None
-    if data_dir is None and manifest_obj and manifest_obj.get("data_root"):
-        data_dir = Path(str(manifest_obj["data_root"])).expanduser().resolve()
-
-    if data_dir is None:
-        raise RuntimeError("No data directory found. Provide --data-dir or set DATA_DIR or set manifest.data_root.")
-    if not data_dir.exists():
-        raise FileNotFoundError(f"Data directory not found: {data_dir}")
+    # Valid days (48 bars/day)
+    valid_days = load_valid_days_csv(valid_days_path)
+    print(f"✅ Valid days loaded: {len(valid_days)} ({valid_days_path})")
 
     # Load data
-    if manifest_obj:
-        df, used_files = load_dataset_from_manifest(data_dir, manifest_obj, symbol, timeframe)
-    else:
-        df, used_files = load_dataset_fallback_all_csvs(data_dir)
+    df_raw, raw_manifest, data_dir, used_files = load_raw_dataset_from_manifest(
+        manifest_path=manifest_path,
+        data_dir_override=data_dir_override,
+        symbol=symbol,
+        timeframe=timeframe,
+    )
+    print(f"✅ Loaded candles: {len(df_raw)}  ({symbol} {timeframe})")
 
     # Strategy pipeline
-    df = add_trend_indicators(df, period=adx_period)
-    orb_ranges = identify_orb_ranges(df, orb_start_time=orb_start, orb_end_time=orb_end)
-    df = generate_orb_signals(df, orb_ranges, adx_threshold=adx_threshold, orb_cutoff_time=orb_cutoff)
+    df_ind = add_trend_indicators(df_raw, period=adx_period)
+    orb_ranges = identify_orb_ranges(df_ind, orb_start_time=orb_start, orb_end_time=orb_end)
+    orb_ranges = orb_ranges.loc[orb_ranges.index.isin(valid_days)]  # enforce valid day definition
 
-    # Ensure date exists for backtest loop (generate_orb_signals should add it)
-    if "date" not in df.columns:
-        df = df.copy()
-        df["date"] = df.index.date
+    df_sig = generate_orb_signals(
+        df_ind,
+        orb_ranges=orb_ranges,
+        adx_threshold=adx_threshold,
+        orb_cutoff_time=orb_cutoff,
+    )
 
+    # Zero out signals on invalid days (keeps candles but blocks entries)
+    invalid_mask = ~df_sig["date"].isin(valid_days)
+    df_sig.loc[invalid_mask, "signal"] = 0
+    df_sig.loc[invalid_mask, "signal_type"] = ""
+
+    # Backtest
     trades, equity_curve, final_capital, total_fees_paid = backtest_orb_strategy(
-        df,
-        orb_ranges,
+        df=df_sig,
+        orb_ranges=orb_ranges,
         initial_capital=initial_capital,
         position_size=position_size,
         taker_fee_rate=taker_fee_rate,
+        valid_days=valid_days,
     )
 
-    metrics, trades_df, signal_types = calculate_metrics(
-        trades,
-        equity_curve,
-        initial_capital=initial_capital,
-        final_capital=final_capital,
-        total_fees_paid=total_fees_paid,
-    )
+    trades_df = pd.DataFrame(trades)
+    equity_df = pd.DataFrame({"timestamp": df_sig.index, "equity": equity_curve})
 
-    # Write baseline artifacts
-    payload = {
+    # Metrics
+    total_trades = int(len(trades_df))
+    if total_trades:
+        winning_trades = int((trades_df["pnl"] > 0).sum())
+        losing_trades = int((trades_df["pnl"] <= 0).sum())
+        win_rate = (winning_trades / total_trades) * 100.0
+        avg_win = float(trades_df.loc[trades_df["pnl"] > 0, "pnl"].mean()) if winning_trades else 0.0
+        avg_loss = float(trades_df.loc[trades_df["pnl"] <= 0, "pnl"].mean()) if losing_trades else 0.0
+        avg_ret = float(trades_df["return"].mean())
+        total_pnl_gross = float(trades_df["gross_pnl"].sum())
+        total_pnl_net = float(trades_df["pnl"].sum())
+        signal_type_counts = trades_df["signal_type"].value_counts().to_dict()
+    else:
+        winning_trades = 0
+        losing_trades = 0
+        win_rate = 0.0
+        avg_win = 0.0
+        avg_loss = 0.0
+        avg_ret = 0.0
+        total_pnl_gross = 0.0
+        total_pnl_net = 0.0
+        signal_type_counts = {}
+
+    fee_impact = float(total_pnl_gross - total_pnl_net)
+    total_return_pct = (final_capital / initial_capital - 1.0) * 100.0 if initial_capital else 0.0
+    max_dd_pct = compute_max_drawdown_pct(equity_df["equity"])
+    fees_pct_capital = (total_fees_paid / initial_capital * 100.0) if initial_capital else 0.0
+    avg_fees_trade = (total_fees_paid / total_trades) if total_trades else 0.0
+
+    results: Dict[str, Any] = {
         "symbol": symbol,
         "timeframe": timeframe,
+        "range": {
+            "start": df_sig.index.min().isoformat(),
+            "end": df_sig.index.max().isoformat(),
+            "candles": int(len(df_sig)),
+        },
+        "dataset": {
+            "data_dir": str(data_dir),
+            "manifest_path": str(manifest_path),
+            "dataset_sha256": raw_manifest.get("dataset_sha256"),
+        },
         "params": {
-            "orb_start": orb_start.strftime("%H:%M"),
-            "orb_end": orb_end.strftime("%H:%M"),
-            "orb_cutoff": orb_cutoff.strftime("%H:%M"),
+            "orb_start": cfg["orb"]["start"],
+            "orb_end": cfg["orb"]["end"],
+            "orb_cutoff": cfg["orb"]["cutoff"],
             "adx_period": adx_period,
             "adx_threshold": adx_threshold,
             "initial_capital": initial_capital,
             "position_size": position_size,
             "taker_fee_rate": taker_fee_rate,
         },
-        "dataset": {
-            "data_dir": str(data_dir),
-            "dataset_sha256": dataset_sha256,
-            "manifest_path": str(manifest_path) if manifest_obj else None,
+        "signal_type_counts": signal_type_counts,
+        "metrics": {
+            "Initial Capital": float(initial_capital),
+            "Final Capital": float(final_capital),
+            "Total Trades": total_trades,
+            "Winning Trades": winning_trades,
+            "Losing Trades": losing_trades,
+            "Win Rate %": float(win_rate),
+            "Total P&L Net": float(total_pnl_net),
+            "Total P&L Gross": float(total_pnl_gross),
+            "Total Return %": float(total_return_pct),
+            "Average Win": float(avg_win),
+            "Average Loss": float(avg_loss),
+            "Average Return %": float(avg_ret),
+            "Max Drawdown %": float(max_dd_pct),
+            "Total Fees Paid": float(total_fees_paid),
+            "Fees % of Capital": float(fees_pct_capital),
+            "Avg Fees/Trade": float(avg_fees_trade),
+            "Fee Impact on P&L": float(fee_impact),
         },
-        "range": {
-            "candles": int(len(df)),
-            "start": df.index.min().isoformat() if len(df) else None,
-            "end": df.index.max().isoformat() if len(df) else None,
-        },
-        "metrics": metrics,
-        "signal_type_counts": signal_types.to_dict() if hasattr(signal_types, "to_dict") else {},
     }
-    results_path.write_text(stable_json(payload), encoding="utf-8")
 
-    trades_out = OUT_DIR / "trades.csv"
-    equity_out = OUT_DIR / "equity_curve.csv"
-    orb_out = OUT_DIR / "orb_ranges.csv"
-    meta_out = OUT_DIR / "run_metadata.json"
+    # Outputs
+    results_path = out_dir / "results.json"
+    trades_path = out_dir / "trades.csv"
+    equity_path = out_dir / "equity_curve.csv"
+    orb_path = out_dir / "orb_ranges.csv"
+    meta_path = out_dir / "run_metadata.json"
+    hashes_path = out_dir / "hashes.json"
+    plot_path = out_dir / "equity_curve.png"
 
-    if len(trades_df):
-        trades_df.to_csv(trades_out, index=False)
-    else:
-        trades_out.write_text("", encoding="utf-8")
+    results_path.write_text(stable_json(results), encoding="utf-8")
+    trades_df.to_csv(trades_path, index=False)
+    equity_df.to_csv(equity_path, index=False)
 
-    pd.DataFrame({"timestamp": df.index[: len(equity_curve)], "equity": equity_curve}).to_csv(equity_out, index=False)
-    orb_ranges.reset_index().to_csv(orb_out, index=False)
+    orb_out = orb_ranges.copy()
+    orb_out.index = orb_out.index.astype(str)
+    orb_out.to_csv(orb_path, index_label="date_utc")
 
-    meta = RunMetadata(
-        created_at_utc=datetime.now(timezone.utc).isoformat(),
-        git_commit=get_git_commit_hash(REPO_ROOT),
-        config_sha256=config_hash,
-        manifest_sha256=manifest_sha256,
-        dataset_sha256=dataset_sha256,
-        data_dir=str(data_dir),
-        python_version=sys.version.replace("\n", " "),
-        platform=f"{platform.system()} {platform.release()} ({platform.platform()})",
-        packages_freeze=get_pip_freeze() if args.include_packages else None,
-        argv=sys.argv,
-        used_files=used_files,
-    )
-    meta_out.write_text(stable_json(asdict(meta)), encoding="utf-8")
+    maybe_write_equity_plot(equity_df, plot_path)
 
-    # Optional plot (not part of “strict identical outputs”)
-    if args.plot:
-        import matplotlib.pyplot as plt
+    # Metadata + hashes
+    script_path = Path(__file__).resolve()
+    outputs = {
+        "results.json": str(results_path),
+        "trades.csv": str(trades_path),
+        "equity_curve.csv": str(equity_path),
+        "orb_ranges.csv": str(orb_path),
+        "run_metadata.json": str(meta_path),
+        "hashes.json": str(hashes_path),
+    }
+    if plot_path.exists():
+        outputs["equity_curve.png"] = str(plot_path)
 
-        plt.figure(figsize=(12, 5))
-        plt.plot(df.index[: len(equity_curve)], equity_curve)
-        plt.title("Equity Curve")
-        plt.tight_layout()
-        plt.savefig(plot_path, dpi=150)
-        plt.close()
+    hashes = {name: sha256_file(Path(p)) for name, p in outputs.items() if Path(p).exists()}
 
-    print(f"✅ Baseline written to: {OUT_DIR}")
+    meta = {
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "git": get_git_info(),
+        "python": {"version": sys.version, "executable": sys.executable},
+        "platform": {"platform": platform.platform()},
+        "inputs": {
+            "config_path": str(config_path),
+            "config_sha256": sha256_bytes(cfg_text.encode("utf-8")),
+            "raw_manifest_path": str(manifest_path),
+            "raw_manifest_sha256": sha256_file(manifest_path),
+            "raw_dataset_sha256": raw_manifest.get("dataset_sha256"),
+            "raw_data_dir": str(data_dir),
+            "valid_days_path": str(valid_days_path),
+            "valid_days_sha256": sha256_file(valid_days_path),
+            "used_files": used_files,
+            "script_path": str(script_path),
+            "script_sha256": sha256_file(script_path),
+        },
+        "outputs": outputs,
+        "output_sha256": hashes,
+    }
+
+    meta_path.write_text(stable_json(meta), encoding="utf-8")
+    hashes_path.write_text(stable_json(hashes), encoding="utf-8")
+
+    print(f"\n✅ Wrote outputs to: {out_dir}")
+    for k in outputs.keys():
+        print(f"  - {k}")
+
     return 0
 
 
