@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Data Quality Report</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color:#111; }
+    h1,h2 { margin: 0 0 12px 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    .card { border: 1px solid #e5e5e5; border-radius: 12px; padding: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: top; text-align:left; }
+    th { width: 38%; color:#333; }
+    pre { font-size: 12px; }
+    code { font-size: 12px; }
+    .small { color:#666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Data Quality Report</h1>
+  <p class="small">Generated: 2026-02-12T18:08:18.250643+00:00</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Dataset</h2>
+      <table><tr><th>data_dir</th><td>C:\Users\wrodr\Documents\GitHub\crypto-orb-research\data\raw</td></tr><tr><th>dataset_sha256</th><td>152947fcfe56f72be5857445de89dea4c401601e93c734f7e7f57bc822f6e940</td></tr><tr><th>files_analyzed</th><td>61</td></tr><tr><th>manifest_path</th><td>C:\Users\wrodr\Documents\GitHub\crypto-orb-research\data\manifest.json</td></tr><tr><th>manifest_sha256</th><td>00466a87729984391226ac62ed261045b82640914fe8ad7996c77341382ee082</td></tr></table>
+    </div>
+    <div class="card">
+      <h2>Summary</h2>
+      <table><tr><th>bars_total</th><td>88883</td></tr><tr><th>bars_unique</th><td>88883</td></tr><tr><th>duplicates_total</th><td>0</td></tr><tr><th>end_utc</th><td>2026-01-31T23:30:00+00:00</td></tr><tr><th>expected_bars</th><td>89135</td></tr><tr><th>expected_bars_per_day</th><td>48</td></tr><tr><th>gap_count</th><td>13</td></tr><tr><th>invalid_days_count</th><td>17</td></tr><tr><th>is_monotonic_increasing_after_sort</th><td>True</td></tr><tr><th>largest_gap_minutes</th><td>4380.0</td></tr><tr><th>misaligned_bars</th><td>0</td></tr><tr><th>missing_bars</th><td>252</td></tr><tr><th>missing_bars_from_gaps</th><td>252</td></tr><tr><th>missing_pct</th><td>0.282717</td></tr><tr><th>nat_timestamps_total</th><td>0</td></tr><tr><th>start_utc</th><td>2021-01-01T00:30:00+00:00</td></tr></table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h2>Missing Bars by Day</h2>
+    <table><tr><th>date_utc</th><th>expected_bars</th><th>present_bars</th><th>missing_bars</th></tr><tr><td><code>2022-02-26</code></td><td>48</td><td>0</td><td><b>48</b></td></tr><tr><td><code>2022-02-27</code></td><td>48</td><td>0</td><td><b>48</b></td></tr><tr><td><code>2022-02-28</code></td><td>48</td><td>0</td><td><b>48</b></td></tr><tr><td><code>2022-04-01</code></td><td>48</td><td>0</td><td><b>48</b></td></tr><tr><td><code>2022-04-02</code></td><td>48</td><td>0</td><td><b>48</b></td></tr><tr><td><code>2021-02-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2021-03-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2021-04-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2021-05-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2021-06-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2021-07-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2021-08-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2021-09-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2021-10-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2021-11-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2021-12-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr><tr><td><code>2022-03-01</code></td><td>48</td><td>47</td><td><b>1</b></td></tr></table>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h2>Samples</h2>
+    <table><tr><th>gaps_sample</th><td><pre style='margin:0; white-space:pre-wrap'>[
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2022-02-25T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2022-03-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 4380.0,
+    &quot;missing_bars&quot;: 145
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2022-03-31T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2022-04-03T00:00:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 2910.0,
+    &quot;missing_bars&quot;: 96
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-01-31T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-02-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-02-28T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-03-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-03-31T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-04-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-04-30T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-05-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-05-31T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-06-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-06-30T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-07-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-07-31T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-08-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-08-31T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-09-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-09-30T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-10-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-10-31T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-11-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  },
+  {
+    &quot;gap_start_prev_bar_utc&quot;: &quot;2021-11-30T23:30:00+00:00&quot;,
+    &quot;gap_end_next_bar_utc&quot;: &quot;2021-12-01T00:30:00+00:00&quot;,
+    &quot;gap_minutes&quot;: 60.0,
+    &quot;missing_bars&quot;: 1
+  }
+]</pre></td></tr><tr><th>misaligned_sample</th><td><pre style='margin:0; white-space:pre-wrap'>[]</pre></td></tr><tr><th>missing_sample</th><td><pre style='margin:0; white-space:pre-wrap'>[
+  &quot;2021-02-01T00:00:00+00:00&quot;,
+  &quot;2021-03-01T00:00:00+00:00&quot;,
+  &quot;2021-04-01T00:00:00+00:00&quot;,
+  &quot;2021-05-01T00:00:00+00:00&quot;,
+  &quot;2021-06-01T00:00:00+00:00&quot;,
+  &quot;2021-07-01T00:00:00+00:00&quot;,
+  &quot;2021-08-01T00:00:00+00:00&quot;,
+  &quot;2021-09-01T00:00:00+00:00&quot;,
+  &quot;2021-10-01T00:00:00+00:00&quot;,
+  &quot;2021-11-01T00:00:00+00:00&quot;,
+  &quot;2021-12-01T00:00:00+00:00&quot;,
+  &quot;2022-02-26T00:00:00+00:00&quot;,
+  &quot;2022-02-26T00:30:00+00:00&quot;,
+  &quot;2022-02-26T01:00:00+00:00&quot;,
+  &quot;2022-02-26T01:30:00+00:00&quot;,
+  &quot;2022-02-26T02:00:00+00:00&quot;,
+  &quot;2022-02-26T02:30:00+00:00&quot;,
+  &quot;2022-02-26T03:00:00+00:00&quot;,
+  &quot;2022-02-26T03:30:00+00:00&quot;,
+  &quot;2022-02-26T04:00:00+00:00&quot;,
+  &quot;2022-02-26T04:30:00+00:00&quot;,
+  &quot;2022-02-26T05:00:00+00:00&quot;,
+  &quot;2022-02-26T05:30:00+00:00&quot;,
+  &quot;2022-02-26T06:00:00+00:00&quot;,
+  &quot;2022-02-26T06:30:00+00:00&quot;,
+  &quot;2022-02-26T07:00:00+00:00&quot;,
+  &quot;2022-02-26T07:30:00+00:00&quot;,
+  &quot;2022-02-26T08:00:00+00:00&quot;,
+  &quot;2022-02-26T08:30:00+00:00&quot;,
+  &quot;2022-02-26T09:00:00+00:00&quot;,
+  &quot;2022-02-26T09:30:00+00:00&quot;,
+  &quot;2022-02-26T10:00:00+00:00&quot;,
+  &quot;2022-02-26T10:30:00+00:00&quot;,
+  &quot;2022-02-26T11:00:00+00:00&quot;,
+  &quot;2022-02-26T11:30:00+00:00&quot;,
+  &quot;2022-02-26T12:00:00+00:00&quot;,
+  &quot;2022-02-26T12:30:00+00:00&quot;,
+  &quot;2022-02-26T13:00:00+00:00&quot;,
+  &quot;2022-02-26T13:30:00+00:00&quot;,
+  &quot;2022-02-26T14:00:00+00:00&quot;,
+  &quot;2022-02-26T14:30:00+00:00&quot;,
+  &quot;2022-02-26T15:00:00+00:00&quot;,
+  &quot;2022-02-26T15:30:00+00:00&quot;,
+  &quot;2022-02-26T16:00:00+00:00&quot;,
+  &quot;2022-02-26T16:30:00+00:00&quot;,
+  &quot;2022-02-26T17:00:00+00:00&quot;,
+  &quot;2022-02-26T17:30:00+00:00&quot;,
+  &quot;2022-02-26T18:00:00+00:00&quot;,
+  &quot;2022-02-26T18:30:00+00:00&quot;,
+  &quot;2022-02-26T19:00:00+00:00&quot;
+]</pre></td></tr></table>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h2>Files</h2>
+    <table><tr><th>path</th><th>bars</th><th>duplicates</th><th>NaT</th><th>start_utc</th><th>end_utc</th></tr><tr><td><code>SOLUSDT-30m-2021-01.csv</code></td><td>1487</td><td>0</td><td>0</td><td>2021-01-01T00:30:00+00:00</td><td>2021-01-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-02.csv</code></td><td>1343</td><td>0</td><td>0</td><td>2021-02-01T00:30:00+00:00</td><td>2021-02-28T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-03.csv</code></td><td>1487</td><td>0</td><td>0</td><td>2021-03-01T00:30:00+00:00</td><td>2021-03-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-04.csv</code></td><td>1439</td><td>0</td><td>0</td><td>2021-04-01T00:30:00+00:00</td><td>2021-04-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-05.csv</code></td><td>1487</td><td>0</td><td>0</td><td>2021-05-01T00:30:00+00:00</td><td>2021-05-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-06.csv</code></td><td>1439</td><td>0</td><td>0</td><td>2021-06-01T00:30:00+00:00</td><td>2021-06-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-07.csv</code></td><td>1487</td><td>0</td><td>0</td><td>2021-07-01T00:30:00+00:00</td><td>2021-07-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-08.csv</code></td><td>1487</td><td>0</td><td>0</td><td>2021-08-01T00:30:00+00:00</td><td>2021-08-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-09.csv</code></td><td>1439</td><td>0</td><td>0</td><td>2021-09-01T00:30:00+00:00</td><td>2021-09-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-10.csv</code></td><td>1487</td><td>0</td><td>0</td><td>2021-10-01T00:30:00+00:00</td><td>2021-10-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-11.csv</code></td><td>1439</td><td>0</td><td>0</td><td>2021-11-01T00:30:00+00:00</td><td>2021-11-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2021-12.csv</code></td><td>1487</td><td>0</td><td>0</td><td>2021-12-01T00:30:00+00:00</td><td>2021-12-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-01.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2022-01-01T00:00:00+00:00</td><td>2022-01-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-02.csv</code></td><td>1200</td><td>0</td><td>0</td><td>2022-02-01T00:00:00+00:00</td><td>2022-02-25T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-03.csv</code></td><td>1487</td><td>0</td><td>0</td><td>2022-03-01T00:30:00+00:00</td><td>2022-03-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-04.csv</code></td><td>1344</td><td>0</td><td>0</td><td>2022-04-03T00:00:00+00:00</td><td>2022-04-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-05.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2022-05-01T00:00:00+00:00</td><td>2022-05-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-06.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2022-06-01T00:00:00+00:00</td><td>2022-06-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-07.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2022-07-01T00:00:00+00:00</td><td>2022-07-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-08.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2022-08-01T00:00:00+00:00</td><td>2022-08-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-09.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2022-09-01T00:00:00+00:00</td><td>2022-09-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-10.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2022-10-01T00:00:00+00:00</td><td>2022-10-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-11.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2022-11-01T00:00:00+00:00</td><td>2022-11-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2022-12.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2022-12-01T00:00:00+00:00</td><td>2022-12-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-01.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2023-01-01T00:00:00+00:00</td><td>2023-01-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-02.csv</code></td><td>1344</td><td>0</td><td>0</td><td>2023-02-01T00:00:00+00:00</td><td>2023-02-28T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-03.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2023-03-01T00:00:00+00:00</td><td>2023-03-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-04.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2023-04-01T00:00:00+00:00</td><td>2023-04-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-05.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2023-05-01T00:00:00+00:00</td><td>2023-05-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-06.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2023-06-01T00:00:00+00:00</td><td>2023-06-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-07.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2023-07-01T00:00:00+00:00</td><td>2023-07-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-08.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2023-08-01T00:00:00+00:00</td><td>2023-08-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-09.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2023-09-01T00:00:00+00:00</td><td>2023-09-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-10.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2023-10-01T00:00:00+00:00</td><td>2023-10-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-11.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2023-11-01T00:00:00+00:00</td><td>2023-11-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2023-12.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2023-12-01T00:00:00+00:00</td><td>2023-12-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-01.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2024-01-01T00:00:00+00:00</td><td>2024-01-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-02.csv</code></td><td>1392</td><td>0</td><td>0</td><td>2024-02-01T00:00:00+00:00</td><td>2024-02-29T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-03.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2024-03-01T00:00:00+00:00</td><td>2024-03-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-04.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2024-04-01T00:00:00+00:00</td><td>2024-04-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-05.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2024-05-01T00:00:00+00:00</td><td>2024-05-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-06.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2024-06-01T00:00:00+00:00</td><td>2024-06-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-07.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2024-07-01T00:00:00+00:00</td><td>2024-07-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-08.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2024-08-01T00:00:00+00:00</td><td>2024-08-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-09.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2024-09-01T00:00:00+00:00</td><td>2024-09-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-10.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2024-10-01T00:00:00+00:00</td><td>2024-10-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-11.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2024-11-01T00:00:00+00:00</td><td>2024-11-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2024-12.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2024-12-01T00:00:00+00:00</td><td>2024-12-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-01.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2025-01-01T00:00:00+00:00</td><td>2025-01-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-02.csv</code></td><td>1344</td><td>0</td><td>0</td><td>2025-02-01T00:00:00+00:00</td><td>2025-02-28T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-03.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2025-03-01T00:00:00+00:00</td><td>2025-03-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-04.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2025-04-01T00:00:00+00:00</td><td>2025-04-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-05.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2025-05-01T00:00:00+00:00</td><td>2025-05-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-06.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2025-06-01T00:00:00+00:00</td><td>2025-06-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-07.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2025-07-01T00:00:00+00:00</td><td>2025-07-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-08.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2025-08-01T00:00:00+00:00</td><td>2025-08-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-09.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2025-09-01T00:00:00+00:00</td><td>2025-09-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-10.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2025-10-01T00:00:00+00:00</td><td>2025-10-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-11.csv</code></td><td>1440</td><td>0</td><td>0</td><td>2025-11-01T00:00:00+00:00</td><td>2025-11-30T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2025-12.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2025-12-01T00:00:00+00:00</td><td>2025-12-31T23:30:00+00:00</td></tr><tr><td><code>SOLUSDT-30m-2026-01.csv</code></td><td>1488</td><td>0</td><td>0</td><td>2026-01-01T00:00:00+00:00</td><td>2026-01-31T23:30:00+00:00</td></tr></table>
+  </div>
+</body>
+</html>
