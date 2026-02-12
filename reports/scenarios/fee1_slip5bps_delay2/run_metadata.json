@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-12T21:10:34.176409+00:00",
+  "generated_utc": "2026-02-12T21:04:45.223655+00:00",
   "git": {
     "branch": "main",
     "commit": "6f1c393941a54d7a9438aa6bd615bb0be515389a",
@@ -81,22 +81,20 @@
     "valid_days_sha256": "c3593b3dad070b7835c599ada7d6972615f4999a4e53efe21479315864df21d6"
   },
   "output_sha256": {
-    "equity_curve.csv": "1d143a9c37b880c774c940eb45603704cd87dd491b0cb49aaaced85fd856fb12",
-    "equity_curve.png": "e9a3a89d57ef98599d1837e2dd247232e38e9efdc1879d4e18ff387d96bfbf04",
-    "hashes.json": "2115033924eb3eb73234d16d92a42248d0cf1ac6f246db623b8cc5010a52bd79",
+    "equity_curve.csv": "02be3186ab8df6730a51f2ea57ced56461af953a9cb32883b6b2def7745f036e",
+    "equity_curve.png": "94c5d4448080bf352e501e7eedb7cbeede38f993a1c8aaac845aedefd9e78b27",
     "orb_ranges.csv": "cd94e2fc7162fa7ae9b6d31bd9a0a4538f895351762d5a5b6bb2356e2379d47b",
-    "results.json": "3fc24ba20eb98450cf7e568b54ee1d24996bcaf719b0f17506cd92e2bb0d3aa2",
-    "run_metadata.json": "e1470616ef02279102546350d8e7cef9dbcdcbcb7faa0663a495c279e182d06f",
-    "trades.csv": "eb8c639606a4fc47746248f23f3c69c953c7ca009f43154ddf22847206a6983d"
+    "results.json": "efe6c83ab8e1262a0b3b3384ef0b2cf4bf63afc6ff158744c78c979f550f11e8",
+    "trades.csv": "d5de3cadbf038ac146a69e26c7a3756334ee9e2af4f7dcb1b85cd9d8d4560803"
   },
   "outputs": {
-    "equity_curve.csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\baseline\\equity_curve.csv",
-    "equity_curve.png": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\baseline\\equity_curve.png",
-    "hashes.json": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\baseline\\hashes.json",
-    "orb_ranges.csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\baseline\\orb_ranges.csv",
-    "results.json": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\baseline\\results.json",
-    "run_metadata.json": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\baseline\\run_metadata.json",
-    "trades.csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\baseline\\trades.csv"
+    "equity_curve.csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\scenarios\\fee1_slip5bps_delay2\\equity_curve.csv",
+    "equity_curve.png": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\scenarios\\fee1_slip5bps_delay2\\equity_curve.png",
+    "hashes.json": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\scenarios\\fee1_slip5bps_delay2\\hashes.json",
+    "orb_ranges.csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\scenarios\\fee1_slip5bps_delay2\\orb_ranges.csv",
+    "results.json": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\scenarios\\fee1_slip5bps_delay2\\results.json",
+    "run_metadata.json": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\scenarios\\fee1_slip5bps_delay2\\run_metadata.json",
+    "trades.csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\scenarios\\fee1_slip5bps_delay2\\trades.csv"
   },
   "platform": {
     "platform": "Windows-10-10.0.19045-SP0"

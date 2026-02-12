@@ -5,23 +5,23 @@
     "manifest_path": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\manifest.json"
   },
   "metrics": {
-    "Average Loss": -683.4327550698031,
-    "Average Return %": 0.8215227597588878,
-    "Average Win": 373.0287149983802,
-    "Avg Fees/Trade": 19.514894115890648,
-    "Fee Impact on P&L": 1593.6351827599647,
-    "Fees % of Capital": 32.00442635006066,
-    "Final Capital": 31537.288885033642,
+    "Average Loss": -632.2101795529284,
+    "Average Return %": 0.7384520899119167,
+    "Average Win": 335.22074755179426,
+    "Avg Fees/Trade": 17.91936273331268,
+    "Fee Impact on P&L": 1463.8577356856695,
+    "Fees % of Capital": 29.387754882632798,
+    "Final Capital": 27706.340543041882,
     "Initial Capital": 10000.0,
-    "Losing Trades": 36,
-    "Max Drawdown %": -19.98311573726246,
-    "Total Fees Paid": 3200.442635006066,
-    "Total P&L Gross": 24737.731520039728,
-    "Total P&L Net": 23144.096337279763,
-    "Total Return %": 215.37288885033644,
+    "Losing Trades": 37,
+    "Max Drawdown %": -20.580684095125612,
+    "Total Fees Paid": 2938.77548826328,
+    "Total P&L Gross": 20645.116031305188,
+    "Total P&L Net": 19181.25829561952,
+    "Total Return %": 177.0634054304188,
     "Total Trades": 164,
-    "Win Rate %": 78.04878048780488,
-    "Winning Trades": 128
+    "Win Rate %": 77.4390243902439,
+    "Winning Trades": 127
   },
   "params": {
     "adx_period": 14,
@@ -33,7 +33,7 @@
     "orb_end": "14:00",
     "orb_start": "13:30",
     "position_size": 0.95,
-    "slippage_bps": 0.0,
+    "slippage_bps": 5.0,
     "taker_fee_rate": 0.0005
   },
   "range": {

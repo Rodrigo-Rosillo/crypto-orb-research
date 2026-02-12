@@ -5,35 +5,35 @@
     "manifest_path": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\manifest.json"
   },
   "metrics": {
-    "Average Loss": -683.4327550698031,
-    "Average Return %": 0.8215227597588878,
-    "Average Win": 373.0287149983802,
-    "Avg Fees/Trade": 19.514894115890648,
-    "Fee Impact on P&L": 1593.6351827599647,
-    "Fees % of Capital": 32.00442635006066,
-    "Final Capital": 31537.288885033642,
+    "Average Loss": -453.16059544593696,
+    "Average Return %": 0.4620364063602647,
+    "Average Win": 229.5937697524886,
+    "Avg Fees/Trade": 15.125967138593008,
+    "Fee Impact on P&L": 1251.9349479343473,
+    "Fees % of Capital": 25.109105450064394,
+    "Final Capital": 17495.15247830871,
     "Initial Capital": 10000.0,
-    "Losing Trades": 36,
-    "Max Drawdown %": -19.98311573726246,
-    "Total Fees Paid": 3200.442635006066,
-    "Total P&L Gross": 24737.731520039728,
-    "Total P&L Net": 23144.096337279763,
-    "Total Return %": 215.37288885033644,
-    "Total Trades": 164,
-    "Win Rate %": 78.04878048780488,
-    "Winning Trades": 128
+    "Losing Trades": 43,
+    "Max Drawdown %": -22.590332147888205,
+    "Total Fees Paid": 2510.9105450064394,
+    "Total P&L Gross": 10006.06302331516,
+    "Total P&L Net": 8754.128075380813,
+    "Total Return %": 74.95152478308711,
+    "Total Trades": 166,
+    "Win Rate %": 74.09638554216868,
+    "Winning Trades": 123
   },
   "params": {
     "adx_period": 14,
     "adx_threshold": 43.0,
-    "delay_bars": 1,
-    "fee_mult": 1.0,
+    "delay_bars": 2,
+    "fee_mult": 1.25,
     "initial_capital": 10000.0,
     "orb_cutoff": "14:00",
     "orb_end": "14:00",
     "orb_start": "13:30",
     "position_size": 0.95,
-    "slippage_bps": 0.0,
+    "slippage_bps": 1.0,
     "taker_fee_rate": 0.0005
   },
   "range": {
@@ -42,7 +42,7 @@
     "start": "2021-01-01T00:30:00+00:00"
   },
   "signal_type_counts": {
-    "downtrend_breakdown": 164
+    "downtrend_breakdown": 166
   },
   "symbol": "SOLUSDT",
   "timeframe": "30m"

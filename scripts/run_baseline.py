@@ -167,19 +167,33 @@ def backtest_orb_strategy(
     position_size: float = 0.95,
     taker_fee_rate: float = 0.0005,
     valid_days: Optional[set] = None,
+    fee_mult: float = 1.0,
+    slippage_bps: float = 0.0,
+    delay_bars: int = 1,
 ) -> Tuple[List[Dict[str, Any]], List[float], float, float]:
     """
-    Next-candle-open execution:
-    - Signal is observed at candle close (bar i).
-    - Entry executes at next candle open (bar i+1).
-    - Pending entries ARE allowed to execute on the next UTC day (00:00 or later).
-    - When executing a pending entry, ORB levels are taken from the signal day (pending_date).
-    - Enforces valid day policy:
-        * scheduling only on valid signal days
-        * execution only if both signal day and execution day are valid
-    - TP/SL evaluated using candle high/low after entry (stop checked first).
+    Next-open execution with realism switches:
+      - delay_bars: bars between signal and entry (1 = next bar open)
+      - slippage_bps: applied to entries and exits (conservative adverse slip)
+      - fee_mult: multiplies taker_fee_rate (stress test fee tiers)
+    Valid day policy enforced:
+      - schedule only on valid signal days
+      - execute only if BOTH signal day and execution day are valid
+
+    TP/SL evaluated using candle high/low after entry (stop checked first).
     """
     valid_days = valid_days or set()
+    delay_bars = max(int(delay_bars), 1)
+    fee_rate = float(taker_fee_rate) * float(fee_mult)
+    slip = float(slippage_bps) / 10000.0
+
+    def slip_price(raw_price: float, side: str) -> float:
+        # side = "buy" or "sell" (adverse slippage)
+        if side == "buy":
+            return raw_price * (1.0 + slip)
+        if side == "sell":
+            return raw_price * (1.0 - slip)
+        raise ValueError("side must be 'buy' or 'sell'")
 
     capital = float(initial_capital)
     position = 0.0
@@ -193,7 +207,8 @@ def backtest_orb_strategy(
     # Pending order state
     pending_signal: int = 0
     pending_signal_type: str = ""
-    pending_date = None  # UTC day (python date) where the signal occurred
+    pending_date = None         # signal day (python date)
+    pending_due_i: Optional[int] = None  # bar index when it should execute
 
     # Trade state vars
     entry_time = None
@@ -210,8 +225,8 @@ def backtest_orb_strategy(
         signal = int(df["signal"].iloc[i])
         signal_type = str(df["signal_type"].iloc[i])
 
-        # 1) Execute pending entry at this bar open (if any)
-        if position == 0.0 and pending_signal != 0:
+        # 1) Execute pending entry at this bar open (if due)
+        if position == 0.0 and pending_signal != 0 and pending_due_i == i:
             if (
                 pending_date in orb_ranges.index
                 and capital > 0
@@ -222,10 +237,16 @@ def backtest_orb_strategy(
                 orb_low = float(orb_ranges.loc[pending_date, "orb_low"])
 
                 notional_value = capital * position_size
-                entry_fee = notional_value * taker_fee_rate
+                entry_fee = notional_value * fee_rate
                 total_fees_paid += entry_fee
 
-                entry_price = bar_open
+                # Entry fill at open + slippage (buy for longs, sell for shorts)
+                if pending_signal == 1:
+                    fill = slip_price(bar_open, "buy")
+                else:
+                    fill = slip_price(bar_open, "sell")
+
+                entry_price = float(fill)
                 entry_time = df.index[i]
                 entry_signal_type = pending_signal_type
 
@@ -233,7 +254,6 @@ def backtest_orb_strategy(
                     # LONG (uptrend_reversion)
                     position = (notional_value - entry_fee) / entry_price
                     capital -= notional_value
-
                     target_price = orb_high
                     pct_to_target = (target_price - entry_price) / entry_price
                     stop_loss = entry_price * (1 - pct_to_target)
@@ -242,7 +262,6 @@ def backtest_orb_strategy(
                     # SHORT (downtrend_breakdown)
                     position = -((notional_value - entry_fee) / entry_price)
                     capital -= notional_value
-
                     target_price = entry_price * 0.98
                     stop_loss = orb_high
 
@@ -250,7 +269,6 @@ def backtest_orb_strategy(
                     # SHORT (downtrend_reversion)
                     position = -((notional_value - entry_fee) / entry_price)
                     capital -= notional_value
-
                     target_price = orb_low
                     pct_to_target = (entry_price - target_price) / entry_price
                     stop_loss = entry_price * (1 + pct_to_target)
@@ -259,14 +277,17 @@ def backtest_orb_strategy(
             pending_signal = 0
             pending_signal_type = ""
             pending_date = None
+            pending_due_i = None
 
-        # 2) Manage open position
+        # 2) Manage open position (SL first, then TP). Apply adverse slippage on exit.
         if position != 0.0:
             # LONG
             if position > 0.0:
                 if bar_low <= stop_loss:
-                    exit_price = float(stop_loss)
-                    exit_fee = exit_price * position * taker_fee_rate
+                    # stop exit is a sell
+                    raw_exit = float(stop_loss)
+                    exit_price = float(slip_price(raw_exit, "sell"))
+                    exit_fee = exit_price * position * fee_rate
                     total_fees_paid += exit_fee
 
                     gross_pnl = (exit_price - entry_price) * position
@@ -296,8 +317,10 @@ def backtest_orb_strategy(
                     position = 0.0
 
                 elif bar_high >= target_price:
-                    exit_price = float(target_price)
-                    exit_fee = exit_price * position * taker_fee_rate
+                    # target exit is a sell
+                    raw_exit = float(target_price)
+                    exit_price = float(slip_price(raw_exit, "sell"))
+                    exit_fee = exit_price * position * fee_rate
                     total_fees_paid += exit_fee
 
                     gross_pnl = (exit_price - entry_price) * position
@@ -329,8 +352,10 @@ def backtest_orb_strategy(
             # SHORT
             else:
                 if bar_high >= stop_loss:
-                    exit_price = float(stop_loss)
-                    exit_fee = exit_price * abs(position) * taker_fee_rate
+                    # stop exit is a buy (cover)
+                    raw_exit = float(stop_loss)
+                    exit_price = float(slip_price(raw_exit, "buy"))
+                    exit_fee = exit_price * abs(position) * fee_rate
                     total_fees_paid += exit_fee
 
                     gross_pnl = (entry_price - exit_price) * abs(position)
@@ -360,8 +385,10 @@ def backtest_orb_strategy(
                     position = 0.0
 
                 elif bar_low <= target_price:
-                    exit_price = float(target_price)
-                    exit_fee = exit_price * abs(position) * taker_fee_rate
+                    # target exit is a buy (cover)
+                    raw_exit = float(target_price)
+                    exit_price = float(slip_price(raw_exit, "buy"))
+                    exit_fee = exit_price * abs(position) * fee_rate
                     total_fees_paid += exit_fee
 
                     gross_pnl = (entry_price - exit_price) * abs(position)
@@ -390,14 +417,16 @@ def backtest_orb_strategy(
                     )
                     position = 0.0
 
-        # 3) If flat, schedule pending order from this bar’s signal
+        # 3) Schedule pending order from this bar’s signal (valid signal days only)
         if position == 0.0 and signal != 0 and capital > 0 and current_date in valid_days:
-            if i + 1 < len(df):
+            due = i + delay_bars
+            if due < len(df):
                 pending_signal = signal
                 pending_signal_type = signal_type
                 pending_date = current_date
+                pending_due_i = due
 
-        # 4) Mark-to-market equity on bar close
+        # 4) Mark-to-market equity on bar close (deterministic)
         if position > 0:
             current_equity = capital + (position * bar_close)
         elif position < 0:
@@ -409,65 +438,46 @@ def backtest_orb_strategy(
 
         equity_curve.append(float(current_equity))
 
-    # Close at end (last bar close)
+    # Close at end (last bar close) — treat as market exit with slippage
     if position != 0.0:
         last_close = float(df["close"].iloc[-1])
         if position > 0.0:
-            exit_fee = last_close * position * taker_fee_rate
+            exit_price = float(slip_price(last_close, "sell"))
+            exit_fee = exit_price * position * fee_rate
             total_fees_paid += exit_fee
 
-            gross_pnl = (last_close - entry_price) * position
+            gross_pnl = (exit_price - entry_price) * position
             net_pnl = gross_pnl - exit_fee
-            capital += last_close * position - exit_fee
-
-            trades.append(
-                {
-                    "entry_time": entry_time,
-                    "exit_time": df.index[-1],
-                    "type": "LONG",
-                    "signal_type": entry_signal_type,
-                    "entry_price": entry_price,
-                    "exit_price": last_close,
-                    "target_price": target_price,
-                    "stop_loss": stop_loss,
-                    "position": float(position),
-                    "pnl": float(net_pnl),
-                    "gross_pnl": float(gross_pnl),
-                    "entry_fee": float(entry_fee),
-                    "exit_fee": float(exit_fee),
-                    "total_fees": float(entry_fee + exit_fee),
-                    "return": float(net_pnl / (entry_price * position) * 100.0),
-                    "exit_reason": "end",
-                }
-            )
+            capital += exit_price * position - exit_fee
         else:
-            exit_fee = last_close * abs(position) * taker_fee_rate
+            exit_price = float(slip_price(last_close, "buy"))
+            exit_fee = exit_price * abs(position) * fee_rate
             total_fees_paid += exit_fee
 
-            gross_pnl = (entry_price - last_close) * abs(position)
+            gross_pnl = (entry_price - exit_price) * abs(position)
             net_pnl = gross_pnl - exit_fee
             capital += net_pnl + (abs(position) * entry_price)
 
-            trades.append(
-                {
-                    "entry_time": entry_time,
-                    "exit_time": df.index[-1],
-                    "type": "SHORT",
-                    "signal_type": entry_signal_type,
-                    "entry_price": entry_price,
-                    "exit_price": last_close,
-                    "target_price": target_price,
-                    "stop_loss": stop_loss,
-                    "position": float(abs(position)),
-                    "pnl": float(net_pnl),
-                    "gross_pnl": float(gross_pnl),
-                    "entry_fee": float(entry_fee),
-                    "exit_fee": float(exit_fee),
-                    "total_fees": float(entry_fee + exit_fee),
-                    "return": float(net_pnl / (entry_price * abs(position)) * 100.0),
-                    "exit_reason": "end",
-                }
-            )
+        trades.append(
+            {
+                "entry_time": entry_time,
+                "exit_time": df.index[-1],
+                "type": "LONG" if position > 0 else "SHORT",
+                "signal_type": entry_signal_type,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "target_price": target_price,
+                "stop_loss": stop_loss,
+                "position": float(abs(position)),
+                "pnl": float(net_pnl),
+                "gross_pnl": float(gross_pnl),
+                "entry_fee": float(entry_fee),
+                "exit_fee": float(exit_fee),
+                "total_fees": float(entry_fee + exit_fee),
+                "return": float(net_pnl / (entry_price * abs(position)) * 100.0),
+                "exit_reason": "end",
+            }
+        )
 
     return trades, equity_curve, float(capital), float(total_fees_paid)
 
@@ -510,6 +520,11 @@ def main() -> int:
     ap.add_argument("--data-dir", default="", help="Override raw data directory (otherwise uses manifest.data_root)")
     ap.add_argument("--valid-days", default="data/processed/valid_days.csv", help="Path to valid_days.csv")
     ap.add_argument("--out-dir", default="reports/baseline", help="Output directory")
+    
+    ap.add_argument("--fee-mult", type=float, default=1.0)
+    ap.add_argument("--slippage-bps", type=float, default=0.0)
+    ap.add_argument("--delay-bars", type=int, default=1)
+
     args = ap.parse_args()
 
     config_path = Path(args.config)
@@ -587,6 +602,9 @@ def main() -> int:
         position_size=position_size,
         taker_fee_rate=taker_fee_rate,
         valid_days=valid_days,
+        fee_mult=args.fee_mult,
+        slippage_bps=args.slippage_bps,
+        delay_bars=args.delay_bars,
     )
 
     trades_df = pd.DataFrame(trades)
@@ -643,6 +661,9 @@ def main() -> int:
             "initial_capital": initial_capital,
             "position_size": position_size,
             "taker_fee_rate": taker_fee_rate,
+            'fee_mult':args.fee_mult,
+            'slippage_bps':args.slippage_bps,
+            'delay_bars':args.delay_bars,
         },
         "signal_type_counts": signal_type_counts,
         "metrics": {
