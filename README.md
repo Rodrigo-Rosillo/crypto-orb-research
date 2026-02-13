@@ -1,112 +1,59 @@
 # crypto-orb-research
 
-Research repo for testing an Opening Range Breakout (ORB) strategy on Binance OHLCV data, with deterministic outputs and two execution models (spot + isolated-margin futures).
+Research repo for an Opening Range Breakout (ORB) strategy on **SOLUSDT 30m** Binance data (UTC), with **reproducible** backtests, **spot + isolated-margin futures** execution models, and Phase-3 robustness (walk-forward, bootstraps, benchmarks, regime diagnostics).
 
-## Quick mental model
+> **Educational/research only.** Nothing here is financial advice. If you ever run this live, start with paper/shadow mode and strict risk limits.
 
-The workflow is:
+---
 
-1. **Raw CSV dataset** is described by `data/manifest.json`.
-2. `scripts/build_parquet.py` builds a normalized parquet dataset and valid/invalid trading-day lists under `data/processed/`.
-3. `scripts/run_baseline.py` loads config + data, computes indicators/signals, runs either spot or futures backtest, and writes reports into `reports/baseline/`.
-4. Optional scripts generate data-quality reports, cost-stress scenario grids, and an HTML summary report.
+## What this repo is (and is not)
 
-## Project structure
+**It is:**
+- A “research artifact” where rerunning scripts produces auditable outputs (JSON/CSV/HTML) under `reports/`.
+- A pipeline from **raw CSV** → **data quality checks** → **processed parquet + valid-day list** → **baseline backtest** → **stress/robustness/walk-forward**.
 
-- `config.yaml` — central strategy + risk configuration (symbol/timeframe, ORB window, ADX settings, fees/risk).  
-- `strategy.py` — pure signal logic:
-  - ADX/+DI/-DI calculation
-  - ORB high/low extraction
-  - signal generation rules (currently only `downtrend_breakdown` is active)
-- `backtester/futures_engine.py` — futures execution simulator with:
-  - isolated margin
-  - leverage
-  - fees/slippage/delay
-  - optional funding
-  - liquidation approximation
-- `scripts/spot_engine.py` — spot-style execution simulator used by baseline when `--engine spot`.
-- `scripts/run_baseline.py` — main orchestrator and primary entrypoint for a research run.
-- `scripts/build_parquet.py` — preprocessing + valid day classification.
-- `scripts/data_quality.py` — checks dataset integrity and emits JSON/HTML report.
-- `scripts/run_cost_grid.py` — parameter sweep for fee/slippage/delay (+ leverage/funding for futures).
-- `scripts/render_report.py` — turns baseline outputs into `report.html`.
-- `data/` — manifests and processed dataset artifacts.
-- `reports/` — output artifacts from baseline/quality/scenario runs.
+**It is not:**
+- A production trading bot (Phase 4 covers that separately).
+- A framework for multiple assets/timeframes (it’s currently configured for SOLUSDT 30m).
 
-## Important concepts newcomers should know
+---
 
-- **Determinism is intentional:** baseline script locks hash seed and RNG seeds so repeated runs are reproducible.
-- **Day validity matters:** trades are only allowed on “valid days” (days with expected bar count).
-- **Engine switch:** same signals can be executed via `spot` or `futures` engine (`--engine`).
-- **Signal scope right now:** in `generate_orb_signals`, the other two rules are disabled and only downtrend breakdown is active.
-- **Reports are artifact-first:** scripts write JSON/CSV/HTML artifacts under `reports/` so results can be inspected without rerunning analysis.
+## Current “registered” baseline
+
+**Asset:** SOLUSDT perpetual (data is Binance OHLCV 30m)  
+**Timezone:** UTC for everything  
+**Signals:** only `downtrend_breakdown` rule is active in `strategy.py`  
+**ORB window:** `13:30 → 14:00` (cutoff `14:00`)  
+**ADX:** period `14`, threshold `43`  
+**Execution assumption:** **next-candle open** (delay_bars=1)  
+**Trading days:** only **valid days** (`48` bars present) are eligible for entries  
+**Futures baseline defaults:** 1x leverage, MMR=0.5%, funding per 8h = 0.01% (configurable for research, but 1x is the baseline)
+
+---
+
+## Repo structure (high level)
+
+- `config.yaml` — single source of truth for strategy params (symbol/timeframe/ORB/ADX/fees/risk).
+- `strategy.py` — pure signal logic and indicator computation.
+- `backtester/futures_engine.py` — isolated-margin futures simulator (fees/slippage/delay/funding/liquidation approx).
+- `scripts/spot_engine.py` — spot execution simulator (fees/slippage/delay).
+- `scripts/*.py` — runnable research scripts that write artifacts.
+- `data/manifest.json` — describes **raw CSV dataset** location + per-file hashes.
+- `data/processed/` — parquet dataset + valid/invalid day lists + processed manifest.
+- `reports/` — outputs (baseline, scenarios, walk-forward, robustness, etc.).
+
+---
 
 ## Setup
 
+### 1) Create & activate venv
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
+source .venv/bin/activate
+# Windows PowerShell:
+# .venv\Scripts\Activate.ps1
 
-## Useful commands
 
-### 1) Build processed dataset and valid-day lists
-
-```bash
-python scripts/build_parquet.py
-```
-
-Useful flags:
-
-```bash
-python scripts/build_parquet.py --help
-python scripts/build_parquet.py --raw-manifest data/manifest.json --out-dir data/processed
-```
-
-### 2) Run baseline backtest (spot)
-
-```bash
-PYTHONHASHSEED=0 python scripts/run_baseline.py --engine spot
-```
-
-### 3) Run baseline backtest (futures)
-
-```bash
-PYTHONHASHSEED=0 python scripts/run_baseline.py --engine futures --leverage 1 --mmr 0.005 --funding-per-8h 0.0001
-```
-
-### 4) Generate a data quality report
-
-```bash
-python scripts/data_quality.py
-```
-
-### 5) Sweep cost assumptions (scenario grid)
-
-```bash
-python scripts/run_cost_grid.py
-```
-
-This writes per-scenario outputs under `reports/scenarios/` plus summary CSVs.
-
-### 6) Render an HTML report from baseline artifacts
-
-```bash
-python scripts/render_report.py
-```
-
-## What to inspect after a run
-
-- `reports/baseline/results.json` — top-level metrics and parameters.
-- `reports/baseline/trades.csv` — trade-by-trade outcomes.
-- `reports/baseline/equity_curve.csv` — timestamped equity evolution.
-- `reports/baseline/report.html` — human-readable summary page.
-
-## Recommended “first day” workflow
-
-1. Open `config.yaml` and confirm symbol, timeframe, ORB times, ADX threshold.
-2. Run `python scripts/build_parquet.py`.
-3. Run `PYTHONHASHSEED=0 python scripts/run_baseline.py --engine spot`.
-4. Run `python scripts/render_report.py` and inspect `reports/baseline/report.html`.
-5. Compare with `--engine futures` to understand execution-model sensitivity.
+### 2) Install dependencies
+```pip install -r requirements.txt
+# pyarrow is required for parquet. It’s already listed in requirements.txt.
