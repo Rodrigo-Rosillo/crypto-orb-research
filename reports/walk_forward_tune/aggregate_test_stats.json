@@ -1,0 +1,8 @@
+{
+  "folds": 6,
+  "test_daily_sharpe_mean": 0.7655976885674461,
+  "test_daily_sharpe_median": 1.004672934321159,
+  "test_max_drawdown_pct_worst": -22.0050952872067,
+  "test_total_return_pct_mean": 4.711634701915106,
+  "test_total_return_pct_median": 7.407232891212456
+}

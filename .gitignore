@@ -5,3 +5,4 @@ __pycache__/
 *.ipynb_checkpoints
 reports/scenarios/futures/
 reports/scenarios/spot/
+reports/walk_forward_tune/folds/
