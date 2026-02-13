@@ -56,6 +56,7 @@ source .venv/bin/activate
 
 
 ### 2) Install dependencies
-```pip install -r requirements.txt
+```bash
+pip install -r requirements.txt
 # pyarrow is required for parquet. It’s already listed in requirements.txt.
 ```
