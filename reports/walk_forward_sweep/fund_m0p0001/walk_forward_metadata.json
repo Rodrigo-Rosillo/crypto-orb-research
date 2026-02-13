@@ -1,0 +1,102 @@
+{
+  "aggregate": {
+    "cagr": {
+      "max": 0.5990008948673677,
+      "mean": 0.23180237014749375,
+      "median": 0.2139051470718284,
+      "min": 0.02434488128563639,
+      "p25": 0.10816214771820454,
+      "p75": 0.2535340387589359
+    },
+    "daily_sharpe": {
+      "max": 3.6613443027993657,
+      "mean": 1.5066527611806106,
+      "median": 1.509407258589956,
+      "min": 0.224220798503274,
+      "p25": 0.6879502201613175,
+      "p75": 1.6684061205844942
+    },
+    "expectancy_per_trade": {
+      "max": 126.39068514596622,
+      "mean": 58.08683016976286,
+      "median": 56.59157492973475,
+      "min": 8.503311294254518,
+      "p25": 38.106764663586354,
+      "p75": 65.52189884044621
+    },
+    "folds": 6,
+    "max_drawdown_pct": {
+      "max": -4.225832640028527,
+      "mean": -9.718807762970261,
+      "median": -6.978600888012182,
+      "min": -20.064597795900163,
+      "p25": -12.792399196807963,
+      "p75": -5.745812021599511
+    },
+    "pct_folds_positive_return": 100.0,
+    "total_return_pct": {
+      "max": 26.204541618595336,
+      "mean": 10.666630079131112,
+      "median": 10.263375086260083,
+      "min": 1.206450751378152,
+      "p25": 5.279789119131206,
+      "p75": 11.898426873218598
+    },
+    "total_trades": {
+      "max": 21.0,
+      "mean": 18.0,
+      "median": 18.0,
+      "min": 14.0,
+      "p25": 16.25,
+      "p75": 20.5
+    },
+    "win_rate_pct": {
+      "max": 80.95238095238095,
+      "mean": 73.70217823971694,
+      "median": 73.80952380952381,
+      "min": 68.42105263157895,
+      "p25": 69.41964285714286,
+      "p75": 76.40056022408963
+    }
+  },
+  "generated_utc": "2026-02-13T17:56:00.325655+00:00",
+  "git": {
+    "branch": "main",
+    "commit": "f3c1c46db4b2dc09cba70ac3246a273465f260ec",
+    "dirty": true
+  },
+  "inputs": {
+    "config_path": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\config.yaml",
+    "config_sha256": "aad896bd178f77e49b4c4bf1f73e9ebd4dc19e454d2a632a9d6f7b8ed1976f1a",
+    "data_path": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\processed\\SOLUSDT_30m.parquet",
+    "data_sha256": "b2dce487c161167b031d52b37c7e31ff4f2a884d5591a786686e28a8cf66658a",
+    "valid_days_path": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\processed\\valid_days.csv",
+    "valid_days_sha256": "c3593b3dad070b7835c599ada7d6972615f4999a4e53efe21479315864df21d6"
+  },
+  "outputs": {
+    "folds_csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\walk_forward_sweep\\fund_m0p0001\\walk_forward_folds.csv",
+    "folds_dir": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\walk_forward_sweep\\fund_m0p0001\\folds"
+  },
+  "params": {
+    "delay_bars": 1,
+    "end": "",
+    "engine": "futures",
+    "fee_mult": 1.0,
+    "funding_per_8h": -0.0001,
+    "leverage": 1.0,
+    "mmr": 0.005,
+    "slippage_bps": 0.0,
+    "start": "",
+    "step_months": 6,
+    "test_months": 6,
+    "train_months": 24,
+    "tune_adx_threshold": []
+  },
+  "platform": {
+    "platform": "Windows-10-10.0.19045-SP0"
+  },
+  "python": {
+    "executable": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\.venv\\Scripts\\python.exe",
+    "version": "3.9.13 (tags/v3.9.13:6de2ca5, May 17 2022, 16:36:42) [MSC v.1929 64 bit (AMD64)]"
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "base_metrics": {
+    "cagr": 0.25921479822123206,
+    "daily_sharpe": 1.365236005979985,
+    "days": 1856,
+    "final_equity": 32284.994941563767,
+    "initial_equity": 10000.0,
+    "max_drawdown_pct": -18.975164872202665,
+    "n_daily_returns": 1851,
+    "total_return_pct": 222.8499494156377
+  },
+  "bootstrap": {
+    "alpha": 0.05,
+    "block_days": 14,
+    "ci": {
+      "cagr": {
+        "ci_high": 0.44377621750190743,
+        "ci_low": 0.08361258751494546,
+        "median": 0.2592958003910717
+      },
+      "daily_sharpe": {
+        "ci_high": 2.4078886383705065,
+        "ci_low": 0.50829097585527,
+        "median": 1.401455308519282
+      },
+      "max_drawdown_pct": {
+        "ci_high": -11.070195981723929,
+        "ci_low": -37.88267859855934,
+        "median": -20.541510969316956
+      },
+      "total_return_pct": {
+        "ci_high": 547.2112972232381,
+        "ci_low": 50.429202589598965,
+        "median": 222.95557667470075
+      }
+    },
+    "n_samples": 2000,
+    "seed": 0
+  },
+  "generated_utc": "2026-02-13T18:05:19.951621+00:00",
+  "git": {
+    "branch": "main",
+    "commit": "f3c1c46db4b2dc09cba70ac3246a273465f260ec",
+    "dirty": true
+  },
+  "inputs": {
+    "config_yaml": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\config.yaml",
+    "config_yaml_sha256": "166bcef90fcfa334dc9d29df35a543eb6ee1a226738c4392f23edf843e059b0d",
+    "equity_csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\baseline\\equity_curve.csv",
+    "equity_csv_sha256": "229b8539f53496edd9266bdf0e30201d2d908d5a8aa5558cdedcb787b3010fcf",
+    "results_json": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\baseline\\results.json",
+    "results_json_sha256": "40dc9f93b3d0168622e5592bf11f860de59ed4b5764cbb4e833c8833fe370ac0"
+  },
+  "outputs": {
+    "bootstrap_report_json": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\bootstrap\\bootstrap_report.json",
+    "bootstrap_samples_csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\bootstrap\\bootstrap_samples.csv"
+  },
+  "platform": {
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.9.13 (tags/v3.9.13:6de2ca5, May 17 2022, 16:36:42) [MSC v.1929 64 bit (AMD64)]"
+  }
+}

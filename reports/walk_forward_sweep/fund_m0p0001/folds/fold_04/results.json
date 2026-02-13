@@ -1,0 +1,57 @@
+{
+  "chosen_adx_threshold": 43.0,
+  "engine": "futures",
+  "engine_stats": {
+    "assumptions": {
+      "delay_bars": 1,
+      "fee_rate_effective": 0.0005,
+      "funding_rate_per_8h": -0.0001,
+      "funding_series_used": false,
+      "leverage": 1.0,
+      "mmr": 0.005,
+      "slippage_bps": 0.0
+    },
+    "final_equity": 10990.521125687656,
+    "free_balance_end": 10990.521125687656,
+    "liquidations": 0,
+    "total_fees": 194.57845400660733,
+    "total_funding": 16.54753221975813,
+    "trades": 19
+  },
+  "fold_id": "fold_04",
+  "metrics": {
+    "avg_loss": -250.26365388375362,
+    "avg_win": 192.97312163153373,
+    "cagr": 0.2060824785387818,
+    "daily_sharpe": 1.505422760538463,
+    "expectancy_per_trade": 53.00361357407458,
+    "final_equity": 10990.521125687656,
+    "initial_capital": 10000.0,
+    "liquidations": 0,
+    "losing_trades": 6,
+    "max_drawdown_pct": -4.225832640028527,
+    "total_fees": 194.57845400660733,
+    "total_funding": 16.54753221975813,
+    "total_pnl_net": 1007.068657907417,
+    "total_return_pct": 9.905211256876555,
+    "total_trades": 19,
+    "win_rate_pct": 68.42105263157895,
+    "winning_trades": 13
+  },
+  "params": {
+    "delay_bars": 1,
+    "fee_mult": 1.0,
+    "funding_per_8h": -0.0001,
+    "leverage": 1.0,
+    "mmr": 0.005,
+    "slippage_bps": 0.0
+  },
+  "symbol": "SOLUSDT",
+  "timeframe": "30m",
+  "window": {
+    "test_end": "2025-01-01T00:00:00+00:00",
+    "test_start": "2024-07-01T00:00:00+00:00",
+    "train_end": "2024-07-01T00:00:00+00:00",
+    "train_start": "2022-07-01T00:00:00+00:00"
+  }
+}
