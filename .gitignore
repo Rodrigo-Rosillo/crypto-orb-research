@@ -6,3 +6,4 @@ __pycache__/
 reports/scenarios/futures/
 reports/scenarios/spot/
 reports/walk_forward_tune/folds/
+reports/robustness/scenarios/
