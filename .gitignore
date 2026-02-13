@@ -3,4 +3,5 @@ __pycache__/
 .venv/
 .pytest_cache/
 *.ipynb_checkpoints
-reports/scenarios/
+reports/scenarios/futures/
+reports/scenarios/spot/
