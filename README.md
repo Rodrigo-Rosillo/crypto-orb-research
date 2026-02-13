@@ -52,8 +52,10 @@ python -m venv .venv
 source .venv/bin/activate
 # Windows PowerShell:
 # .venv\Scripts\Activate.ps1
+```
 
 
 ### 2) Install dependencies
 ```pip install -r requirements.txt
 # pyarrow is required for parquet. It’s already listed in requirements.txt.
+```
