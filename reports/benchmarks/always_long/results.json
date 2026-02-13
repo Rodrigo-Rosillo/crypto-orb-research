@@ -1,0 +1,47 @@
+{
+  "benchmark": "always_long",
+  "engine_stats": {
+    "liquidations": 0,
+    "total_fees": 340.5555108608206,
+    "total_funding": 350058.20883279835
+  },
+  "metrics": {
+    "avg_loss": 0.0,
+    "avg_win": 661770.4662107803,
+    "cagr": 1.2799142016803082,
+    "daily_sharpe": 1.2564395635140426,
+    "expectancy_per_trade": 661770.4662107803,
+    "final_equity": 662111.0217216412,
+    "initial_capital": 10000.0,
+    "liquidations": 0,
+    "losing_trades": 0,
+    "max_drawdown_pct": -97.37062595096486,
+    "total_fees": 340.5555108608206,
+    "total_funding": 350058.20883279835,
+    "total_pnl_net": 661770.4662107803,
+    "total_return_pct": 6521.110217216412,
+    "total_trades": 1,
+    "win_rate_pct": 100.0,
+    "winning_trades": 1
+  },
+  "params": {
+    "delay_bars": 1,
+    "fee_mult": 1.0,
+    "funding_per_8h": 0.0001,
+    "initial_capital": 10000.0,
+    "leverage": 1.0,
+    "ma_fast_days": null,
+    "ma_slow_days": null,
+    "mmr": 0.005,
+    "position_size": 0.95,
+    "slippage_bps": 0.0,
+    "taker_fee_rate": 0.0005
+  },
+  "range": {
+    "candles": 88883,
+    "end": "2026-01-31T23:30:00+00:00",
+    "start": "2021-01-01T00:30:00+00:00"
+  },
+  "symbol": "SOLUSDT",
+  "timeframe": "30m"
+}

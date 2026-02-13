@@ -1,0 +1,71 @@
+{
+  "engine_stats": {
+    "assumptions": {
+      "delay_bars": 1,
+      "fee_rate_effective": 0.0005,
+      "funding_rate_per_8h": 0.0001,
+      "funding_series_used": false,
+      "leverage": 1.0,
+      "mmr": 0.005,
+      "slippage_bps": 0.0
+    },
+    "final_equity": 12028.44590896515,
+    "free_balance_end": 12028.44590896515,
+    "liquidations": 0,
+    "total_fees": 2446.8371339829196,
+    "total_funding": -313.59252948459226,
+    "trades": 264
+  },
+  "metrics": {
+    "avg_loss": -342.53617150106686,
+    "avg_win": 175.12901195827138,
+    "cagr": 0.03696911608997833,
+    "daily_sharpe": 0.2829419488532921,
+    "expectancy_per_trade": 6.495656740456639,
+    "final_equity": 12028.44590896515,
+    "initial_capital": 10000.0,
+    "liquidations": 0,
+    "losing_trades": 86,
+    "max_drawdown_pct": -34.54458927042609,
+    "total_fees": 2446.8371339829196,
+    "total_funding": -313.59252948459226,
+    "total_pnl_net": 1714.8533794805528,
+    "total_return_pct": 20.284459089651506,
+    "total_trades": 264,
+    "win_rate_pct": 67.42424242424242,
+    "winning_trades": 178
+  },
+  "params": {
+    "adx_period": 14,
+    "adx_threshold": 38.0,
+    "cutoff_offset_min": 0,
+    "delay_bars": 1,
+    "engine": "futures",
+    "fee_mult": 1.0,
+    "funding_per_8h": 0.0001,
+    "initial_capital": 10000.0,
+    "leverage": 1.0,
+    "mmr": 0.005,
+    "orb_cutoff": "13:30",
+    "orb_end": "13:30",
+    "orb_start": "13:00",
+    "orb_window_min": 30,
+    "position_size": 0.95,
+    "slippage_bps": 0.0,
+    "taker_fee_rate": 0.0005
+  },
+  "range": {
+    "candles": 88883,
+    "end": "2026-01-31T23:30:00+00:00",
+    "start": "2021-01-01T00:30:00+00:00"
+  },
+  "scenario_id": "adx38_orb1300",
+  "signals": {
+    "signal_type_counts": {
+      "downtrend_breakdown": 266
+    },
+    "signals_total": 266
+  },
+  "symbol": "SOLUSDT",
+  "timeframe": "30m"
+}

@@ -1,0 +1,47 @@
+{
+  "benchmark": "cash",
+  "engine_stats": {
+    "liquidations": 0,
+    "total_fees": 0.0,
+    "total_funding": 0.0
+  },
+  "metrics": {
+    "avg_loss": 0.0,
+    "avg_win": 0.0,
+    "cagr": 0.0,
+    "daily_sharpe": 0.0,
+    "expectancy_per_trade": 0.0,
+    "final_equity": 10000.0,
+    "initial_capital": 10000.0,
+    "liquidations": 0,
+    "losing_trades": 0,
+    "max_drawdown_pct": 0.0,
+    "total_fees": 0.0,
+    "total_funding": 0.0,
+    "total_pnl_net": 0.0,
+    "total_return_pct": 0.0,
+    "total_trades": 0,
+    "win_rate_pct": 0.0,
+    "winning_trades": 0
+  },
+  "params": {
+    "delay_bars": 1,
+    "fee_mult": 1.0,
+    "funding_per_8h": 0.0001,
+    "initial_capital": 10000.0,
+    "leverage": 1.0,
+    "ma_fast_days": null,
+    "ma_slow_days": null,
+    "mmr": 0.005,
+    "position_size": 0.95,
+    "slippage_bps": 0.0,
+    "taker_fee_rate": 0.0005
+  },
+  "range": {
+    "candles": 88883,
+    "end": "2026-01-31T23:30:00+00:00",
+    "start": "2021-01-01T00:30:00+00:00"
+  },
+  "symbol": "SOLUSDT",
+  "timeframe": "30m"
+}

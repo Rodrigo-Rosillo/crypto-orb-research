@@ -1,0 +1,19 @@
+{
+  "always_long/equity_curve.csv": "f9ed7a7832592b15b06d1c70596d3ef16dd872b15a15faf76141d636634ac55e",
+  "always_long/equity_curve.png": "bdc07a29243d60f2816991fe1e47e10960fec6b8e70b487dce177a43739c244d",
+  "always_long/results.json": "dce4bfc264892d16963f7c491e0068619c952bf6b281f669d7340ee4cf799bef",
+  "always_long/trades.csv": "4dd006a320ba1732e752ab377f1b2a43f822a47c76c97dc1a0162dbf5ca73292",
+  "always_short/equity_curve.csv": "e0b34ab3a4cf459c3630ac5e3b78c7626d91c484b1de2fb117cde8f8e8cfad52",
+  "always_short/equity_curve.png": "5cdf041bbf05676d08d016d1020d0c3baf3ec939be04e6deb04d2e860a6ec2b5",
+  "always_short/results.json": "4bff176bf95a2ad80b7dc63bbeb71e3d4462ee63232af41b46c16aaa2e76ebe8",
+  "always_short/trades.csv": "b13674859d51ed8e4dc28e3bb1daf3be8a4c65eb70157546f507080f54383032",
+  "benchmarks_summary.csv": "2c0e724d329d9183e0b2995596b5ab718908967ca68dead5f27af0c47bd4d3a0",
+  "cash/equity_curve.csv": "39a22c1a2c2d216ce6fb2096db46664b953d709266432fc5c6aebcb572361b3c",
+  "cash/equity_curve.png": "54a36edc674f3a7ffc04708088020d38380591715fe041268d2bd86fbf21c8dd",
+  "cash/results.json": "f00da9a5427ee9ef0a7b2264fd5a6c4bea3db19e54a17c8709f10cabfa330bad",
+  "cash/trades.csv": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+  "ma_trend/equity_curve.csv": "c49fac65ddb4ab40a5728af1c1fae7cd0d4fc891593adccec2c10e802518c32d",
+  "ma_trend/equity_curve.png": "86b01e8528d9ccc1e022e02350d55bb40b4c117677626297be7caa2831d4b57d",
+  "ma_trend/results.json": "b60869a2f676ef64efbd6638bf0239234414c5372fc2db1a7dd736d3b1bb6dc1",
+  "ma_trend/trades.csv": "ed1ceac3a30ae1ac8397714488b990355c511dcd730c39cc7312349fe0226b0c"
+}

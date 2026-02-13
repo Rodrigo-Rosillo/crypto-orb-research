@@ -1,0 +1,51 @@
+{
+  "benchmark": "ma_trend",
+  "engine_stats": {
+    "liquidations": 1,
+    "ma_fast_days": 50,
+    "ma_fast_window_bars": 2400,
+    "ma_slow_days": 200,
+    "ma_slow_window_bars": 9600,
+    "total_fees": 204.3561390045921,
+    "total_funding": 2705.7018983437515
+  },
+  "metrics": {
+    "avg_loss": -9695.917676120718,
+    "avg_win": 14411.446537113967,
+    "cagr": -0.32124827032075154,
+    "daily_sharpe": 0.21548284331473946,
+    "expectancy_per_trade": -423.85451718430124,
+    "final_equity": 1392.579023651846,
+    "initial_capital": 10000.0,
+    "liquidations": 1,
+    "losing_trades": 8,
+    "max_drawdown_pct": -99.13200055623244,
+    "total_fees": 204.3561390045921,
+    "total_funding": 2705.7018983437515,
+    "total_pnl_net": -5510.108723395916,
+    "total_return_pct": -86.07420976348155,
+    "total_trades": 13,
+    "win_rate_pct": 38.46153846153847,
+    "winning_trades": 5
+  },
+  "params": {
+    "delay_bars": 1,
+    "fee_mult": 1.0,
+    "funding_per_8h": 0.0001,
+    "initial_capital": 10000.0,
+    "leverage": 1.0,
+    "ma_fast_days": 50,
+    "ma_slow_days": 200,
+    "mmr": 0.005,
+    "position_size": 0.95,
+    "slippage_bps": 0.0,
+    "taker_fee_rate": 0.0005
+  },
+  "range": {
+    "candles": 88883,
+    "end": "2026-01-31T23:30:00+00:00",
+    "start": "2021-01-01T00:30:00+00:00"
+  },
+  "symbol": "SOLUSDT",
+  "timeframe": "30m"
+}

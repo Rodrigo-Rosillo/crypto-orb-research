@@ -1,0 +1,2 @@
+entry_time,exit_time,type,signal_type,entry_price,exit_price,qty,leverage,initial_margin_used,entry_fee,exit_fee,fees_total,pnl_gross,pnl_net,exit_reason
+2021-01-01 00:30:00+00:00,2026-01-31 23:30:00+00:00,LONG,always_long,1.4916,105.45,6368.99973183159,1.0,9500.0,4.75,335.8055108608206,340.5555108608206,662111.0217216412,661770.4662107803,end
