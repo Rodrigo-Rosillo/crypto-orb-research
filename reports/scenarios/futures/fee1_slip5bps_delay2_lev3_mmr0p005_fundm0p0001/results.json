@@ -1,0 +1,67 @@
+{
+  "dataset": {
+    "data_dir": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\raw",
+    "dataset_sha256": "152947fcfe56f72be5857445de89dea4c401601e93c734f7e7f57bc822f6e940",
+    "manifest_path": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\manifest.json"
+  },
+  "engine": "futures",
+  "engine_stats": {
+    "assumptions": {
+      "delay_bars": 2,
+      "fee_rate_effective": 0.0005,
+      "funding_rate_per_8h": -0.0001,
+      "funding_series_used": false,
+      "leverage": 3.0,
+      "mmr": 0.005,
+      "slippage_bps": 5.0
+    },
+    "final_equity": 20776.985190366395,
+    "free_balance_end": 20776.985190366395,
+    "liquidations": 0,
+    "total_fees": 6159.958761885,
+    "total_funding": 713.2103803260366,
+    "trades": 166
+  },
+  "metrics": {
+    "Average Loss": -1509.0665327593276,
+    "Average Win": 656.1833846682823,
+    "Final Equity": 20776.985190366395,
+    "Initial Capital": 10000.0,
+    "Liquidations": 0,
+    "Losing Trades": 45,
+    "Max Drawdown %": -63.461558759000326,
+    "Total Fees Paid": 6159.958761885,
+    "Total Funding Paid": 713.2103803260366,
+    "Total P&L Net": 11490.195570692424,
+    "Total Return %": 107.76985190366392,
+    "Total Trades": 166,
+    "Win Rate %": 72.89156626506023,
+    "Winning Trades": 121
+  },
+  "params": {
+    "adx_period": 14,
+    "adx_threshold": 43.0,
+    "delay_bars": 2,
+    "fee_mult": 1.0,
+    "funding_per_8h": -0.0001,
+    "initial_capital": 10000.0,
+    "leverage": 3.0,
+    "mmr": 0.005,
+    "orb_cutoff": "14:00",
+    "orb_end": "14:00",
+    "orb_start": "13:30",
+    "position_size": 0.95,
+    "slippage_bps": 5.0,
+    "taker_fee_rate": 0.0005
+  },
+  "range": {
+    "candles": 88883,
+    "end": "2026-01-31T23:30:00+00:00",
+    "start": "2021-01-01T00:30:00+00:00"
+  },
+  "signal_type_counts": {
+    "downtrend_breakdown": 166
+  },
+  "symbol": "SOLUSDT",
+  "timeframe": "30m"
+}

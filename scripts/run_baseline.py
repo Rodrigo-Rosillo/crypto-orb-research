@@ -12,7 +12,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -28,6 +28,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
+
+# Futures engine (Phase 2)
+from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
 
 
 def stable_json(obj: Any) -> str:
@@ -49,17 +52,6 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
 def parse_hhmm(s: str):
     hh, mm = s.strip().split(":")
     return datetime(2000, 1, 1, int(hh), int(mm)).time()
-
-
-def parse_timeframe_to_minutes(tf: str) -> int:
-    tf = tf.strip().lower()
-    if tf.endswith("m"):
-        return int(tf[:-1])
-    if tf.endswith("h"):
-        return int(tf[:-1]) * 60
-    if tf.endswith("d"):
-        return int(tf[:-1]) * 60 * 24
-    raise ValueError(f"Unsupported timeframe: {tf}. Use like '30m', '1h', '1d'.")
 
 
 def load_valid_days_csv(path: Path) -> set:
@@ -114,7 +106,6 @@ def load_raw_dataset_from_manifest(
     if data_dir_override is not None:
         data_dir = data_dir_override
     else:
-        # If manifest has relative path, interpret relative to repo root
         data_dir = Path(str(data_root))
         if not data_dir.is_absolute():
             data_dir = (REPO_ROOT / data_dir).resolve()
@@ -160,328 +151,6 @@ def compute_max_drawdown_pct(equity: pd.Series) -> float:
     return float(dd.min() * 100.0)
 
 
-def backtest_orb_strategy(
-    df: pd.DataFrame,
-    orb_ranges: pd.DataFrame,
-    initial_capital: float = 10000,
-    position_size: float = 0.95,
-    taker_fee_rate: float = 0.0005,
-    valid_days: Optional[set] = None,
-    fee_mult: float = 1.0,
-    slippage_bps: float = 0.0,
-    delay_bars: int = 1,
-) -> Tuple[List[Dict[str, Any]], List[float], float, float]:
-    """
-    Next-open execution with realism switches:
-      - delay_bars: bars between signal and entry (1 = next bar open)
-      - slippage_bps: applied to entries and exits (conservative adverse slip)
-      - fee_mult: multiplies taker_fee_rate (stress test fee tiers)
-    Valid day policy enforced:
-      - schedule only on valid signal days
-      - execute only if BOTH signal day and execution day are valid
-
-    TP/SL evaluated using candle high/low after entry (stop checked first).
-    """
-    valid_days = valid_days or set()
-    delay_bars = max(int(delay_bars), 1)
-    fee_rate = float(taker_fee_rate) * float(fee_mult)
-    slip = float(slippage_bps) / 10000.0
-
-    def slip_price(raw_price: float, side: str) -> float:
-        # side = "buy" or "sell" (adverse slippage)
-        if side == "buy":
-            return raw_price * (1.0 + slip)
-        if side == "sell":
-            return raw_price * (1.0 - slip)
-        raise ValueError("side must be 'buy' or 'sell'")
-
-    capital = float(initial_capital)
-    position = 0.0
-    entry_price = 0.0
-    stop_loss = 0.0
-    target_price = 0.0
-    trades: List[Dict[str, Any]] = []
-    equity_curve: List[float] = []
-    total_fees_paid = 0.0
-
-    # Pending order state
-    pending_signal: int = 0
-    pending_signal_type: str = ""
-    pending_date = None         # signal day (python date)
-    pending_due_i: Optional[int] = None  # bar index when it should execute
-
-    # Trade state vars
-    entry_time = None
-    entry_signal_type = ""
-    entry_fee = 0.0
-
-    for i in range(len(df)):
-        bar_open = float(df["open"].iloc[i])
-        bar_close = float(df["close"].iloc[i])
-        bar_high = float(df["high"].iloc[i])
-        bar_low = float(df["low"].iloc[i])
-
-        current_date = df["date"].iloc[i]  # python date
-        signal = int(df["signal"].iloc[i])
-        signal_type = str(df["signal_type"].iloc[i])
-
-        # 1) Execute pending entry at this bar open (if due)
-        if position == 0.0 and pending_signal != 0 and pending_due_i == i:
-            if (
-                pending_date in orb_ranges.index
-                and capital > 0
-                and pending_date in valid_days
-                and current_date in valid_days
-            ):
-                orb_high = float(orb_ranges.loc[pending_date, "orb_high"])
-                orb_low = float(orb_ranges.loc[pending_date, "orb_low"])
-
-                notional_value = capital * position_size
-                entry_fee = notional_value * fee_rate
-                total_fees_paid += entry_fee
-
-                # Entry fill at open + slippage (buy for longs, sell for shorts)
-                if pending_signal == 1:
-                    fill = slip_price(bar_open, "buy")
-                else:
-                    fill = slip_price(bar_open, "sell")
-
-                entry_price = float(fill)
-                entry_time = df.index[i]
-                entry_signal_type = pending_signal_type
-
-                if pending_signal == 1:
-                    # LONG (uptrend_reversion)
-                    position = (notional_value - entry_fee) / entry_price
-                    capital -= notional_value
-                    target_price = orb_high
-                    pct_to_target = (target_price - entry_price) / entry_price
-                    stop_loss = entry_price * (1 - pct_to_target)
-
-                elif pending_signal == -1:
-                    # SHORT (downtrend_breakdown)
-                    position = -((notional_value - entry_fee) / entry_price)
-                    capital -= notional_value
-                    target_price = entry_price * 0.98
-                    stop_loss = orb_high
-
-                elif pending_signal == -2:
-                    # SHORT (downtrend_reversion)
-                    position = -((notional_value - entry_fee) / entry_price)
-                    capital -= notional_value
-                    target_price = orb_low
-                    pct_to_target = (entry_price - target_price) / entry_price
-                    stop_loss = entry_price * (1 + pct_to_target)
-
-            # Clear pending either way
-            pending_signal = 0
-            pending_signal_type = ""
-            pending_date = None
-            pending_due_i = None
-
-        # 2) Manage open position (SL first, then TP). Apply adverse slippage on exit.
-        if position != 0.0:
-            # LONG
-            if position > 0.0:
-                if bar_low <= stop_loss:
-                    # stop exit is a sell
-                    raw_exit = float(stop_loss)
-                    exit_price = float(slip_price(raw_exit, "sell"))
-                    exit_fee = exit_price * position * fee_rate
-                    total_fees_paid += exit_fee
-
-                    gross_pnl = (exit_price - entry_price) * position
-                    net_pnl = gross_pnl - exit_fee
-                    capital += exit_price * position - exit_fee
-
-                    trades.append(
-                        {
-                            "entry_time": entry_time,
-                            "exit_time": df.index[i],
-                            "type": "LONG",
-                            "signal_type": entry_signal_type,
-                            "entry_price": entry_price,
-                            "exit_price": exit_price,
-                            "target_price": target_price,
-                            "stop_loss": stop_loss,
-                            "position": float(position),
-                            "pnl": float(net_pnl),
-                            "gross_pnl": float(gross_pnl),
-                            "entry_fee": float(entry_fee),
-                            "exit_fee": float(exit_fee),
-                            "total_fees": float(entry_fee + exit_fee),
-                            "return": float(net_pnl / (entry_price * position) * 100.0),
-                            "exit_reason": "stop_loss",
-                        }
-                    )
-                    position = 0.0
-
-                elif bar_high >= target_price:
-                    # target exit is a sell
-                    raw_exit = float(target_price)
-                    exit_price = float(slip_price(raw_exit, "sell"))
-                    exit_fee = exit_price * position * fee_rate
-                    total_fees_paid += exit_fee
-
-                    gross_pnl = (exit_price - entry_price) * position
-                    net_pnl = gross_pnl - exit_fee
-                    capital += exit_price * position - exit_fee
-
-                    trades.append(
-                        {
-                            "entry_time": entry_time,
-                            "exit_time": df.index[i],
-                            "type": "LONG",
-                            "signal_type": entry_signal_type,
-                            "entry_price": entry_price,
-                            "exit_price": exit_price,
-                            "target_price": target_price,
-                            "stop_loss": stop_loss,
-                            "position": float(position),
-                            "pnl": float(net_pnl),
-                            "gross_pnl": float(gross_pnl),
-                            "entry_fee": float(entry_fee),
-                            "exit_fee": float(exit_fee),
-                            "total_fees": float(entry_fee + exit_fee),
-                            "return": float(net_pnl / (entry_price * position) * 100.0),
-                            "exit_reason": "target",
-                        }
-                    )
-                    position = 0.0
-
-            # SHORT
-            else:
-                if bar_high >= stop_loss:
-                    # stop exit is a buy (cover)
-                    raw_exit = float(stop_loss)
-                    exit_price = float(slip_price(raw_exit, "buy"))
-                    exit_fee = exit_price * abs(position) * fee_rate
-                    total_fees_paid += exit_fee
-
-                    gross_pnl = (entry_price - exit_price) * abs(position)
-                    net_pnl = gross_pnl - exit_fee
-                    capital += net_pnl + (abs(position) * entry_price)
-
-                    trades.append(
-                        {
-                            "entry_time": entry_time,
-                            "exit_time": df.index[i],
-                            "type": "SHORT",
-                            "signal_type": entry_signal_type,
-                            "entry_price": entry_price,
-                            "exit_price": exit_price,
-                            "target_price": target_price,
-                            "stop_loss": stop_loss,
-                            "position": float(abs(position)),
-                            "pnl": float(net_pnl),
-                            "gross_pnl": float(gross_pnl),
-                            "entry_fee": float(entry_fee),
-                            "exit_fee": float(exit_fee),
-                            "total_fees": float(entry_fee + exit_fee),
-                            "return": float(net_pnl / (entry_price * abs(position)) * 100.0),
-                            "exit_reason": "stop_loss",
-                        }
-                    )
-                    position = 0.0
-
-                elif bar_low <= target_price:
-                    # target exit is a buy (cover)
-                    raw_exit = float(target_price)
-                    exit_price = float(slip_price(raw_exit, "buy"))
-                    exit_fee = exit_price * abs(position) * fee_rate
-                    total_fees_paid += exit_fee
-
-                    gross_pnl = (entry_price - exit_price) * abs(position)
-                    net_pnl = gross_pnl - exit_fee
-                    capital += net_pnl + (abs(position) * entry_price)
-
-                    trades.append(
-                        {
-                            "entry_time": entry_time,
-                            "exit_time": df.index[i],
-                            "type": "SHORT",
-                            "signal_type": entry_signal_type,
-                            "entry_price": entry_price,
-                            "exit_price": exit_price,
-                            "target_price": target_price,
-                            "stop_loss": stop_loss,
-                            "position": float(abs(position)),
-                            "pnl": float(net_pnl),
-                            "gross_pnl": float(gross_pnl),
-                            "entry_fee": float(entry_fee),
-                            "exit_fee": float(exit_fee),
-                            "total_fees": float(entry_fee + exit_fee),
-                            "return": float(net_pnl / (entry_price * abs(position)) * 100.0),
-                            "exit_reason": "target",
-                        }
-                    )
-                    position = 0.0
-
-        # 3) Schedule pending order from this bar’s signal (valid signal days only)
-        if position == 0.0 and signal != 0 and capital > 0 and current_date in valid_days:
-            due = i + delay_bars
-            if due < len(df):
-                pending_signal = signal
-                pending_signal_type = signal_type
-                pending_date = current_date
-                pending_due_i = due
-
-        # 4) Mark-to-market equity on bar close (deterministic)
-        if position > 0:
-            current_equity = capital + (position * bar_close)
-        elif position < 0:
-            collateral = abs(position) * entry_price
-            unrealized_pnl = (entry_price - bar_close) * abs(position)
-            current_equity = capital + collateral + unrealized_pnl
-        else:
-            current_equity = capital
-
-        equity_curve.append(float(current_equity))
-
-    # Close at end (last bar close) — treat as market exit with slippage
-    if position != 0.0:
-        last_close = float(df["close"].iloc[-1])
-        if position > 0.0:
-            exit_price = float(slip_price(last_close, "sell"))
-            exit_fee = exit_price * position * fee_rate
-            total_fees_paid += exit_fee
-
-            gross_pnl = (exit_price - entry_price) * position
-            net_pnl = gross_pnl - exit_fee
-            capital += exit_price * position - exit_fee
-        else:
-            exit_price = float(slip_price(last_close, "buy"))
-            exit_fee = exit_price * abs(position) * fee_rate
-            total_fees_paid += exit_fee
-
-            gross_pnl = (entry_price - exit_price) * abs(position)
-            net_pnl = gross_pnl - exit_fee
-            capital += net_pnl + (abs(position) * entry_price)
-
-        trades.append(
-            {
-                "entry_time": entry_time,
-                "exit_time": df.index[-1],
-                "type": "LONG" if position > 0 else "SHORT",
-                "signal_type": entry_signal_type,
-                "entry_price": entry_price,
-                "exit_price": exit_price,
-                "target_price": target_price,
-                "stop_loss": stop_loss,
-                "position": float(abs(position)),
-                "pnl": float(net_pnl),
-                "gross_pnl": float(gross_pnl),
-                "entry_fee": float(entry_fee),
-                "exit_fee": float(exit_fee),
-                "total_fees": float(entry_fee + exit_fee),
-                "return": float(net_pnl / (entry_price * abs(position)) * 100.0),
-                "exit_reason": "end",
-            }
-        )
-
-    return trades, equity_curve, float(capital), float(total_fees_paid)
-
-
 def get_git_info() -> Dict[str, Any]:
     def run(cmd: List[str]) -> str:
         return subprocess.check_output(cmd, cwd=str(REPO_ROOT), stderr=subprocess.DEVNULL).decode().strip()
@@ -514,18 +183,31 @@ def maybe_write_equity_plot(equity_df: pd.DataFrame, out_path: Path) -> None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Run baseline ORB backtest (deterministic)")
+    ap = argparse.ArgumentParser(description="Run ORB backtest (deterministic) with engine switch")
     ap.add_argument("--config", default="config.yaml", help="Path to config.yaml (relative to repo root by default)")
     ap.add_argument("--manifest", default="data/manifest.json", help="Path to raw manifest.json")
     ap.add_argument("--data-dir", default="", help="Override raw data directory (otherwise uses manifest.data_root)")
     ap.add_argument("--valid-days", default="data/processed/valid_days.csv", help="Path to valid_days.csv")
     ap.add_argument("--out-dir", default="reports/baseline", help="Output directory")
-    
+
+    # Phase 2 assumption switches
     ap.add_argument("--fee-mult", type=float, default=1.0)
     ap.add_argument("--slippage-bps", type=float, default=0.0)
     ap.add_argument("--delay-bars", type=int, default=1)
 
+    # Engine selection
+    ap.add_argument("--engine", choices=["spot", "futures"], default="spot")
+
+    # Futures-only knobs (Phase 2)
+    ap.add_argument("--leverage", type=float, default=1.0)
+    ap.add_argument("--mmr", type=float, default=0.005)
+    ap.add_argument("--funding-per-8h", type=float, default=0.0001)
+
     args = ap.parse_args()
+
+    if args.engine == "futures" and args.leverage != 1.0:
+        print(f"⚠️  Running futures with leverage={args.leverage} (default research baseline is 1x).")
+
 
     config_path = Path(args.config)
     if not config_path.is_absolute():
@@ -594,54 +276,123 @@ def main() -> int:
     df_sig.loc[invalid_mask, "signal"] = 0
     df_sig.loc[invalid_mask, "signal_type"] = ""
 
-    # Backtest
-    trades, equity_curve, final_capital, total_fees_paid = backtest_orb_strategy(
-        df=df_sig,
-        orb_ranges=orb_ranges,
-        initial_capital=initial_capital,
-        position_size=position_size,
-        taker_fee_rate=taker_fee_rate,
-        valid_days=valid_days,
-        fee_mult=args.fee_mult,
-        slippage_bps=args.slippage_bps,
-        delay_bars=args.delay_bars,
-    )
+    # Run engine
+    engine = args.engine
+    total_fees_paid = 0.0
+    total_funding = 0.0
+    liquidations = 0
+    engine_stats: Dict[str, Any] = {}
+
+    if engine == "spot":
+        # Keep your current spot-style engine (already in your repo) by importing it here
+        # If you previously had backtest_orb_strategy in this same file, keep using it.
+        # ----
+        # IMPORTANT: For engine-switch mode, we assume you already have backtest_orb_strategy
+        # in THIS file from your Phase 2 work. If you do not, re-add it (or tell me and I’ll
+        # inline it here).
+        from scripts.spot_engine import backtest_orb_strategy  # type: ignore
+
+        trades, equity_curve, final_capital, total_fees_paid = backtest_orb_strategy(
+            df=df_sig,
+            orb_ranges=orb_ranges,
+            initial_capital=initial_capital,
+            position_size=position_size,
+            taker_fee_rate=taker_fee_rate,
+            valid_days=valid_days,
+            fee_mult=args.fee_mult,
+            slippage_bps=args.slippage_bps,
+            delay_bars=args.delay_bars,
+        )
+
+        final_equity = float(equity_curve[-1]) if equity_curve else float(initial_capital)
+        engine_stats = {
+            "final_equity": final_equity,
+            "final_capital": float(final_capital),
+            "total_fees": float(total_fees_paid),
+            "total_funding": 0.0,
+            "liquidations": 0,
+        }
+
+    else:
+        engine_cfg = FuturesEngineConfig(
+            initial_capital=initial_capital,
+            position_size=position_size,        # now interpreted as initial MARGIN fraction
+            leverage=float(args.leverage),
+            taker_fee_rate=taker_fee_rate,
+            fee_mult=float(args.fee_mult),
+            slippage_bps=float(args.slippage_bps),
+            delay_bars=int(args.delay_bars),
+            maintenance_margin_rate=float(args.mmr),
+            funding_rate_per_8h=float(args.funding_per_8h),
+        )
+        trades, equity_curve, stats = backtest_futures_orb(
+            df=df_sig,
+            orb_ranges=orb_ranges,
+            valid_days=valid_days,
+            cfg=engine_cfg,
+        )
+
+        total_fees_paid = float(stats.get("total_fees", 0.0))
+        total_funding = float(stats.get("total_funding", 0.0))
+        liquidations = int(stats.get("liquidations", 0))
+        engine_stats = stats
 
     trades_df = pd.DataFrame(trades)
     equity_df = pd.DataFrame({"timestamp": df_sig.index, "equity": equity_curve})
 
-    # Metrics
+    # Metrics (engine-aware)
     total_trades = int(len(trades_df))
     if total_trades:
-        winning_trades = int((trades_df["pnl"] > 0).sum())
-        losing_trades = int((trades_df["pnl"] <= 0).sum())
-        win_rate = (winning_trades / total_trades) * 100.0
-        avg_win = float(trades_df.loc[trades_df["pnl"] > 0, "pnl"].mean()) if winning_trades else 0.0
-        avg_loss = float(trades_df.loc[trades_df["pnl"] <= 0, "pnl"].mean()) if losing_trades else 0.0
-        avg_ret = float(trades_df["return"].mean())
-        total_pnl_gross = float(trades_df["gross_pnl"].sum())
-        total_pnl_net = float(trades_df["pnl"].sum())
-        signal_type_counts = trades_df["signal_type"].value_counts().to_dict()
+        # Use pnl_net if present (futures), else fallback to pnl (spot)
+        pnl_col = "pnl_net" if "pnl_net" in trades_df.columns else ("pnl" if "pnl" in trades_df.columns else None)
+
+        if pnl_col:
+            winning_trades = int((trades_df[pnl_col] > 0).sum())
+            losing_trades = int((trades_df[pnl_col] <= 0).sum())
+            win_rate = (winning_trades / total_trades) * 100.0
+            avg_win = float(trades_df.loc[trades_df[pnl_col] > 0, pnl_col].mean()) if winning_trades else 0.0
+            avg_loss = float(trades_df.loc[trades_df[pnl_col] <= 0, pnl_col].mean()) if losing_trades else 0.0
+            total_pnl_net = float(trades_df[pnl_col].sum())
+        else:
+            winning_trades = losing_trades = 0
+            win_rate = avg_win = avg_loss = total_pnl_net = 0.0
+
+        signal_type_counts = trades_df["signal_type"].value_counts().to_dict() if "signal_type" in trades_df.columns else {}
     else:
         winning_trades = 0
         losing_trades = 0
         win_rate = 0.0
         avg_win = 0.0
         avg_loss = 0.0
-        avg_ret = 0.0
-        total_pnl_gross = 0.0
         total_pnl_net = 0.0
         signal_type_counts = {}
 
-    fee_impact = float(total_pnl_gross - total_pnl_net)
-    total_return_pct = (final_capital / initial_capital - 1.0) * 100.0 if initial_capital else 0.0
+    final_equity = float(equity_df["equity"].iloc[-1]) if not equity_df.empty else float(initial_capital)
+    total_return_pct = (final_equity / initial_capital - 1.0) * 100.0 if initial_capital else 0.0
     max_dd_pct = compute_max_drawdown_pct(equity_df["equity"])
-    fees_pct_capital = (total_fees_paid / initial_capital * 100.0) if initial_capital else 0.0
-    avg_fees_trade = (total_fees_paid / total_trades) if total_trades else 0.0
+
+    # Outputs
+    results_path = out_dir / "results.json"
+    trades_path = out_dir / "trades.csv"
+    equity_path = out_dir / "equity_curve.csv"
+    orb_path = out_dir / "orb_ranges.csv"
+    meta_path = out_dir / "run_metadata.json"
+    hashes_path = out_dir / "hashes.json"
+    plot_path = out_dir / "equity_curve.png"
+
+    trades_df.to_csv(trades_path, index=False)
+    equity_df.to_csv(equity_path, index=False)
+
+    orb_out = orb_ranges.copy()
+    orb_out.index = orb_out.index.astype(str)
+    orb_out.to_csv(orb_path, index_label="date_utc")
+
+    maybe_write_equity_plot(equity_df, plot_path)
 
     results: Dict[str, Any] = {
         "symbol": symbol,
         "timeframe": timeframe,
+        "engine": engine,
         "range": {
             "start": df_sig.index.min().isoformat(),
             "end": df_sig.index.max().isoformat(),
@@ -661,50 +412,35 @@ def main() -> int:
             "initial_capital": initial_capital,
             "position_size": position_size,
             "taker_fee_rate": taker_fee_rate,
-            'fee_mult':args.fee_mult,
-            'slippage_bps':args.slippage_bps,
-            'delay_bars':args.delay_bars,
+            # phase 2 switches:
+            "fee_mult": float(args.fee_mult),
+            "slippage_bps": float(args.slippage_bps),
+            "delay_bars": int(args.delay_bars),
+            # futures knobs:
+            "leverage": float(args.leverage),
+            "mmr": float(args.mmr),
+            "funding_per_8h": float(args.funding_per_8h),
         },
         "signal_type_counts": signal_type_counts,
         "metrics": {
             "Initial Capital": float(initial_capital),
-            "Final Capital": float(final_capital),
+            "Final Equity": float(final_equity),
+            "Total Return %": float(total_return_pct),
+            "Max Drawdown %": float(max_dd_pct),
             "Total Trades": total_trades,
             "Winning Trades": winning_trades,
             "Losing Trades": losing_trades,
             "Win Rate %": float(win_rate),
-            "Total P&L Net": float(total_pnl_net),
-            "Total P&L Gross": float(total_pnl_gross),
-            "Total Return %": float(total_return_pct),
             "Average Win": float(avg_win),
             "Average Loss": float(avg_loss),
-            "Average Return %": float(avg_ret),
-            "Max Drawdown %": float(max_dd_pct),
+            "Total P&L Net": float(total_pnl_net),
             "Total Fees Paid": float(total_fees_paid),
-            "Fees % of Capital": float(fees_pct_capital),
-            "Avg Fees/Trade": float(avg_fees_trade),
-            "Fee Impact on P&L": float(fee_impact),
+            "Total Funding Paid": float(total_funding),
+            "Liquidations": int(liquidations),
         },
+        "engine_stats": engine_stats,
     }
-
-    # Outputs
-    results_path = out_dir / "results.json"
-    trades_path = out_dir / "trades.csv"
-    equity_path = out_dir / "equity_curve.csv"
-    orb_path = out_dir / "orb_ranges.csv"
-    meta_path = out_dir / "run_metadata.json"
-    hashes_path = out_dir / "hashes.json"
-    plot_path = out_dir / "equity_curve.png"
-
     results_path.write_text(stable_json(results), encoding="utf-8")
-    trades_df.to_csv(trades_path, index=False)
-    equity_df.to_csv(equity_path, index=False)
-
-    orb_out = orb_ranges.copy()
-    orb_out.index = orb_out.index.astype(str)
-    orb_out.to_csv(orb_path, index_label="date_utc")
-
-    maybe_write_equity_plot(equity_df, plot_path)
 
     # Metadata + hashes
     script_path = Path(__file__).resolve()
@@ -738,6 +474,7 @@ def main() -> int:
             "used_files": used_files,
             "script_path": str(script_path),
             "script_sha256": sha256_file(script_path),
+            "engine": engine,
         },
         "outputs": outputs,
         "output_sha256": hashes,
