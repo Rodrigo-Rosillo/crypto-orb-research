@@ -1,0 +1,2 @@
+group,trades,wins,losses,win_rate_pct,total_pnl_net,total_return_pct_on_initial,avg_pnl_net,median_pnl_net,profit_factor,avg_hold_minutes,total_fees,total_funding_est,liquidations
+SHORT,164,128,36,78.04878048780488,21731.632493478544,217.31632493478546,132.5099542285277,319.2025416759583,1.8612070801664022,674.6341463414634,3230.5454238696557,-553.3624480852153,0

@@ -10,25 +10,19 @@
     "objective": "daily_sharpe",
     "slippage_bps": 0.0
   },
-  "generated_utc": "2026-02-13T19:55:53.042741+00:00",
+  "generated_utc": "2026-02-13T20:25:16.052195+00:00",
   "git": {
     "branch": "main",
-    "commit": "67a3fd0edc42a56ce9157add4a9a853ed3d241f6",
+    "commit": "e197707e5884110053dfdaf235c04275b6e311d7",
     "dirty": true
   },
   "grid": {
     "adx_threshold_grid": [
-      35.0,
-      38.0,
-      43.0,
-      48.0,
-      55.0
+      43.0
     ],
     "cutoff_offset_min": 0,
     "orb_start_grid": [
-      "13:00",
-      "13:30",
-      "14:00"
+      "13:30"
     ],
     "orb_window_min": 30
   },
@@ -45,9 +39,9 @@
     "valid_days_sha256": "c3593b3dad070b7835c599ada7d6972615f4999a4e53efe21479315864df21d6"
   },
   "output_sha256": {
-    "aggregate_test_stats.json": "800154eb5549e3042560987775a0509f71f4319bbcf77003677923463f112f71",
-    "selection_counts.csv": "647e29e38ac8068c4cc3e43c90b8e76b1d658b93ca6a16125f35336e6379638f",
-    "walk_forward_tune_summary.csv": "e1b586d04b38db6963814c74b2a45ffb33f91bd83f6a33e0958712d2a7334db5"
+    "aggregate_test_stats.json": "04f37d69f6cae69c639cbb682c8bf750ab21c2ccae13b0012b7690bac8c5887f",
+    "selection_counts.csv": "b80a1d542febf3c3ca0a1005bd537887692fe4b3c6f62a9b52f886c0e9d23fe7",
+    "walk_forward_tune_summary.csv": "81621582c962bdffd38b1179c940cbc7193820163416a53e70bb4b596db95bc6"
   },
   "outputs": {
     "aggregate_test_stats.json": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\walk_forward_tune\\aggregate_test_stats.json",
