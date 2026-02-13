@@ -1,0 +1,58 @@
+{
+  "generated_utc": "2026-02-13T21:18:37.130735+00:00",
+  "git": {
+    "branch": "main",
+    "commit": "a6ddd79089d095a88715c874a35644ac5c7ce729",
+    "dirty": true
+  },
+  "inputs": {
+    "config": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\config.yaml",
+    "config_sha256": "166bcef90fcfa334dc9d29df35a543eb6ee1a226738c4392f23edf843e059b0d",
+    "folds_csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\walk_forward\\walk_forward_folds.csv",
+    "folds_sha256": "2f618eaf2cb65b052bdb94af218ba89a9b3e7881b7c57b75382791d29aa04846",
+    "parquet": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\processed\\SOLUSDT_30m.parquet",
+    "parquet_sha256": "b2dce487c161167b031d52b37c7e31ff4f2a884d5591a786686e28a8cf66658a",
+    "script": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\scripts\\walk_forward_regime_filter.py",
+    "script_sha256": "ccfa564333cd7c86eca27bddb2103c9ce4aa225e2808c07aca7f3333d6096c4b",
+    "valid_days": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\processed\\valid_days.csv",
+    "valid_days_sha256": "c3593b3dad070b7835c599ada7d6972615f4999a4e53efe21479315864df21d6"
+  },
+  "output_sha256": {
+    "blocked_days.csv": "5a4c3ebbf22ba6bf38e697d672805b607acc3e72165c0bfc909c5ea82f3139f0",
+    "walk_forward_regime_filter_summary.csv": "cc7d07f5396185873b608777608f8ed8525ee88f8bd13e7c509abdd205a59928"
+  },
+  "outputs": {
+    "blocked_days.csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\walk_forward_regime_filter\\blocked_days.csv",
+    "walk_forward_regime_filter_summary.csv": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\walk_forward_regime_filter\\walk_forward_regime_filter_summary.csv"
+  },
+  "platform": {
+    "platform": "Windows-10-10.0.19045-SP0"
+  },
+  "python": {
+    "executable": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\.venv\\Scripts\\python.exe",
+    "version": "3.9.13 (tags/v3.9.13:6de2ca5, May 17 2022, 16:36:42) [MSC v.1929 64 bit (AMD64)]"
+  },
+  "settings": {
+    "engine": {
+      "delay_bars": 1,
+      "fee_mult": 1.0,
+      "funding_per_8h": 0.0001,
+      "leverage": 1.0,
+      "mmr": 0.005,
+      "slippage_bps": 0.0
+    },
+    "fixed_params": {
+      "adx_threshold": 43.0,
+      "orb_cutoff": "14:00",
+      "orb_end": "14:00",
+      "orb_start": "13:30"
+    },
+    "regime_filter": {
+      "definition": "Block TEST days where vol_score<=q_low(TRAIN) AND adx_at_orb_end>=q_high(TRAIN). vol_score is trailing mean RV(lookback) shifted 1 day.",
+      "enabled": true,
+      "high_adx_quantile": 0.85,
+      "low_vol_quantile": 0.15,
+      "vol_lookback_days": 30
+    }
+  }
+}
