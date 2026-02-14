@@ -44,6 +44,7 @@ def run_one(
     fee_mult: float,
     slippage_bps: float,
     delay_bars: int,
+    config_path: Optional[str] = None,
     leverage: Optional[float] = None,
     mmr: float = 0.005,
     funding_per_8h: Optional[float] = None,
@@ -69,6 +70,9 @@ def run_one(
             "--delay-bars",
             str(delay_bars),
         ]
+
+        if config_path:
+            cmd += ["--config", str(config_path)]
 
         if engine == "futures":
             if leverage is None:
@@ -112,6 +116,7 @@ def run_one(
 
 def main():
     ap = argparse.ArgumentParser(description="Run cost stress grid for spot + futures engines")
+    ap.add_argument("--config", default="config.yaml", help="Config file passed through to run_baseline.py")
     ap.add_argument("--fee-mults", default="1.0,1.25,1.5")
     ap.add_argument("--slippages-bps", default="0,1,3,5")
     ap.add_argument("--delays", default="1,2")
@@ -160,6 +165,7 @@ def main():
                 spot_rows.append(
                     run_one(
                         engine="spot",
+                        config_path=args.config,
                         out_dir=out_dir,
                         fee_mult=fm,
                         slippage_bps=sb,
@@ -183,6 +189,7 @@ def main():
                         fut_rows.append(
                             run_one(
                                 engine="futures",
+                                config_path=args.config,
                                 out_dir=out_dir,
                                 fee_mult=fm,
                                 slippage_bps=sb,

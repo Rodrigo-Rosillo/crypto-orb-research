@@ -29,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
+from backtester.risk import risk_limits_from_config  # noqa: E402
 
 
 def stable_json(obj: Any) -> str:
@@ -264,6 +265,7 @@ def run_backtest_one(
             orb_ranges=orb_ranges,
             valid_days=valid_days_slice,
             cfg=futures_cfg,
+            risk_limits=risk_limits,
         )
         total_fees = float(stats.get("total_fees", 0.0))
         total_funding = float(stats.get("total_funding", 0.0))
@@ -384,6 +386,9 @@ def main() -> int:
     initial_capital = float(cfg["risk"]["initial_capital"])
     position_size = float(cfg["risk"]["position_size"])
     taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
+
+    # Phase 4 risk controls
+    risk_limits = risk_limits_from_config(cfg)
 
     # Load parquet
     data_path = Path(args.data) if args.data else Path(f"data/processed/{symbol}_{timeframe}.parquet")

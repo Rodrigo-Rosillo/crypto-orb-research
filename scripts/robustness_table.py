@@ -31,6 +31,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
+from backtester.risk import risk_limits_from_config  # noqa: E402
 
 
 def stable_json(obj: Any) -> str:
@@ -128,10 +129,32 @@ def compute_cagr(equity_df: pd.DataFrame, initial_capital: float) -> float:
 
 
 def maybe_write_equity_plot(equity_df: pd.DataFrame, out_path: Path) -> None:
+    """Best-effort plot writer.
+
+    Matplotlib is optional. Some environments have binary wheels mismatches that can emit noisy
+    tracebacks on import; we suppress stderr to keep runs clean.
+    """
     try:
-        import matplotlib.pyplot as plt  # type: ignore
+        import io
+        import contextlib
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            import matplotlib
+            matplotlib.use("Agg", force=True)
+            import matplotlib.pyplot as plt  # noqa: F401
+
+        # Plot (suppress any backend noise)
+        with contextlib.redirect_stderr(io.StringIO()):
+            plt.figure()
+            plt.plot(equity_df["timestamp"], equity_df["equity"])
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            plt.savefig(out_path)
+            plt.close()
     except Exception:
         return
+
+
 
     plt.figure()
     plt.plot(equity_df["timestamp"], equity_df["equity"])
@@ -269,6 +292,9 @@ def main() -> int:
     position_size = float(cfg["risk"]["position_size"])
     taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
 
+    # Phase 4 risk controls
+    risk_limits = risk_limits_from_config(cfg)
+
     # Load parquet
     data_path = Path(args.data) if args.data else Path(f"data/processed/{symbol}_{timeframe}.parquet")
     if not data_path.is_absolute():
@@ -393,6 +419,7 @@ def main() -> int:
                     orb_ranges=orb_ranges,
                     valid_days=valid_days,
                     cfg=futures_cfg,
+                    risk_limits=risk_limits,
                 )
                 total_fees = float(stats.get("total_fees", 0.0))
                 total_funding = float(stats.get("total_funding", 0.0))

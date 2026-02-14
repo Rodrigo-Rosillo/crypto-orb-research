@@ -1,0 +1,44 @@
+# Phase 4 preset: survivable risk controls ON (recommended starting point for any live-like tests)
+
+symbol: SOLUSDT
+timeframe: 30m
+
+timezone:
+  data_timezone: "UTC"
+  orb_times_timezone: "UTC"
+
+orb:
+  start: "13:30"
+  end: "14:00"
+  cutoff: "14:00"
+
+adx:
+  period: 14
+  threshold: 43
+
+risk:
+  initial_capital: 10000
+  position_size: 0.95          # fraction of free balance used as initial margin (capped again by risk_controls)
+
+fees:
+  taker_fee_rate: 0.0005
+
+leverage:
+  enabled: true
+  max_leverage: 1
+
+risk_controls:
+  enabled: true
+
+  # Hard controls
+  max_position_margin_frac: 0.95   # cap initial margin per trade (fraction of equity). If equity = $10,000 and max_position_margin_frac = 0.25, then initial margin per trade cannot exceed $2,500.
+  max_leverage: 2.0               # A hard ceiling on leverage used by the engine (even if config/script asks for more). Effect: If you run with --leverage 5 but max_leverage: 2.0, it clamps down to 2.0.
+  max_daily_loss_pct: 0.03       # stop trading for the day after -3% equity
+  max_drawdown_pct: 0.20          # global circuit breaker after -20% from peak equity
+  max_consecutive_losses: 4 # Maximum number of losing trades in a row allowed (usually counted within the same UTC day, depending on engine logic).
+  max_exposure_bars: 48      # Max time a position is allowed to remain open, measured in bars. E.g 48 bars = 24 hours.
+
+  kill_switch:
+    max_data_gap_bars: 200    # For PROD use 2. If the time gap between consecutive candles exceeds this many bars, the data feed is considered “stale/broken”. 2 bars = 1 hour gap.
+    max_order_rejects_per_day: 2 # Max number of “entry attempts that fail” before halting for the day.
+    max_margin_ratio: 0.80    # A liquidation-risk proxy threshold. Typically:  margin_ratio = maintenance_margin / (margin_balance + unrealized_pnl). higher ratio = closer to trouble. If it spikes above this level → kill switch triggers (halt + flatten).

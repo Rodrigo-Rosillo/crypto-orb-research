@@ -28,6 +28,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb
+from backtester.risk import risk_limits_from_config
 
 
 def stable_json(obj: Any) -> str:
@@ -242,6 +243,9 @@ def main() -> int:
     position_size = float(cfg["risk"]["position_size"])
     taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
 
+    # Phase 4 risk controls
+    risk_limits = risk_limits_from_config(cfg)
+
     valid_days_all = load_valid_days_csv(valid_days_path)
 
     # Load parquet (requires pyarrow)
@@ -334,6 +338,7 @@ def main() -> int:
                         orb_ranges=orb_train,
                         valid_days=valid_train_days,
                         cfg=cfg_eng,
+                        risk_limits=risk_limits,
                     )
                     trades_df = pd.DataFrame(trades)
                     equity_df = pd.DataFrame({"timestamp": train_sig.index, "equity": equity_curve})
@@ -404,6 +409,7 @@ def main() -> int:
                 orb_ranges=orb_test,
                 valid_days=valid_test_days,
                 cfg=cfg_eng,
+                risk_limits=risk_limits,
             )
             total_fees = float(stats.get("total_fees", 0.0))
             total_funding = float(stats.get("total_funding", 0.0))

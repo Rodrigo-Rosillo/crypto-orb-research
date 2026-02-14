@@ -6,34 +6,31 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from .risk import RiskLimits, RiskManager, expected_bar_seconds_from_index
+
 
 @dataclass
 class FuturesEngineConfig:
-    """
-    Isolated-margin USDT-margined futures config (single position at a time).
-    """
+    """Isolated-margin USDT-margined futures config (single position at a time)."""
+
     initial_capital: float = 10_000.0
-    position_size: float = 0.95            # fraction of FREE balance used as initial margin
-    leverage: float = 1.0                  # notional = margin * leverage
-    taker_fee_rate: float = 0.0005         # base taker fee
-    fee_mult: float = 1.0                  # stress multiplier
-    slippage_bps: float = 0.0              # adverse slippage, bps
-    delay_bars: int = 1                    # 1=next bar open
-    maintenance_margin_rate: float = 0.005 # mmr (approx)
+    position_size: float = 0.95  # fraction of FREE balance used as initial margin
+    leverage: float = 1.0  # notional = margin * leverage
+    taker_fee_rate: float = 0.0005  # base taker fee
+    fee_mult: float = 1.0  # stress multiplier
+    slippage_bps: float = 0.0  # adverse slippage, bps
+    delay_bars: int = 1  # 1=next bar open
+    maintenance_margin_rate: float = 0.005  # mmr (approx)
 
     # Funding (optional)
     # If funding_series is provided, index must be UTC timestamps at funding event times.
     # Else funding_rate_per_8h is applied at 00:00/08:00/16:00 UTC.
-    funding_rate_per_8h: float = 0.0       # e.g., 0.0001 = 0.01%
+    funding_rate_per_8h: float = 0.0  # e.g., 0.0001 = 0.01%
     funding_series: Optional[pd.Series] = None
 
 
 def _slip_price(raw_price: float, side: str, slip_frac: float) -> float:
-    """
-    Apply adverse slippage:
-      - buy -> pay more
-      - sell -> receive less
-    """
+    """Apply adverse slippage: buy -> pay more, sell -> receive less."""
     if slip_frac <= 0:
         return float(raw_price)
     if side == "buy":
@@ -49,10 +46,10 @@ def _is_funding_bar(ts: pd.Timestamp) -> bool:
 
 
 def _liq_price(side: str, entry_price: float, qty: float, margin: float, mmr: float) -> float:
-    """
-    Approx liquidation threshold using:
-      liquidate when (margin + unrealized) <= maintenance_margin
-      maintenance_margin = mmr * notional_at_price
+    """Approx liquidation threshold.
+
+    liquidation when (margin + unrealized) <= maintenance_margin
+    maintenance_margin = mmr * notional_at_price
 
     LONG:  price <= (entry_price - margin/qty) / (1 - mmr)
     SHORT: price >= (entry_price + margin/qty) / (1 + mmr)
@@ -77,9 +74,9 @@ def backtest_futures_orb(
     orb_ranges: pd.DataFrame,
     valid_days: Optional[set] = None,
     cfg: Optional[FuturesEngineConfig] = None,
+    risk_limits: Optional[RiskLimits] = None,
 ) -> Tuple[List[Dict[str, Any]], List[float], Dict[str, Any]]:
-    """
-    Futures backtest engine (isolated margin), next-open execution with realism switches.
+    """Futures backtest engine (isolated margin), next-open execution with realism switches.
 
     Expected df columns:
       open, high, low, close (floats)
@@ -92,12 +89,11 @@ def backtest_futures_orb(
       index is python date; columns: orb_high, orb_low
 
     Returns:
-      trades (list of dicts),
-      equity_curve (list of floats at each bar close),
-      stats (dict)
+      trades, equity_curve (mark-to-market at bar close), stats
     """
     if cfg is None:
         cfg = FuturesEngineConfig()
+
     valid_days = valid_days or set()
 
     fee_rate = float(cfg.taker_fee_rate) * float(cfg.fee_mult)
@@ -106,11 +102,24 @@ def backtest_futures_orb(
     leverage = float(cfg.leverage)
     mmr = float(cfg.maintenance_margin_rate)
 
+    # Risk manager (Phase 4)
+    if risk_limits is None:
+        risk_limits = RiskLimits(enabled=False)
+    risk_mgr: Optional[RiskManager] = None
+    if risk_limits.enabled:
+        risk_mgr = RiskManager(risk_limits, expected_bar_seconds_from_index(df.index))
+
+        # Hard control: cap leverage
+        if leverage > float(risk_limits.max_leverage):
+            if len(df):
+                risk_mgr._event(df.index[0], "LEVERAGE_CAPPED", "Leverage capped by risk policy", requested=leverage, applied=float(risk_limits.max_leverage))
+            leverage = float(risk_limits.max_leverage)
+
     # Account state
     free_balance = float(cfg.initial_capital)
     position_margin = 0.0
-    side: Optional[str] = None     # "long" or "short"
-    qty = 0.0                      # positive
+    side: Optional[str] = None  # "long" or "short"
+    qty = 0.0  # positive
     entry_price = 0.0
     entry_time = None
     entry_signal_type = ""
@@ -154,10 +163,7 @@ def backtest_futures_orb(
             position_margin = max(0.0, position_margin - rem)
 
     def apply_funding(ts: pd.Timestamp, mark_price: float) -> None:
-        """
-        Positive rate => longs pay, shorts receive.
-        Applied at funding timestamps.
-        """
+        """Positive rate => longs pay, shorts receive. Applied at funding timestamps."""
         nonlocal position_margin, free_balance, total_funding
 
         if side is None:
@@ -189,13 +195,14 @@ def backtest_futures_orb(
         else:
             position_margin += (-pay)
 
-    def close_position(exit_ts: pd.Timestamp, raw_exit_price: float, reason: str) -> None:
+    def close_position(exit_ts: pd.Timestamp, raw_exit_price: float, reason: str) -> Optional[float]:
+        """Close at given raw price (with slippage) and return pnl_net."""
         nonlocal side, qty, entry_price, entry_time, entry_signal_type
         nonlocal free_balance, position_margin, stop_loss, target_price
         nonlocal current_initial_margin, current_entry_fee
 
         if side is None or qty <= 0:
-            return
+            return None
 
         exit_side = "sell" if side == "long" else "buy"
         exit_price = _slip_price(raw_exit_price, exit_side, slip_frac)
@@ -204,7 +211,6 @@ def backtest_futures_orb(
         exit_fee = exit_notional * fee_rate
         pay_fee(exit_fee)
 
-        # gross realized pnl at exit
         pnl_gross = qty * (exit_price - entry_price) if side == "long" else qty * (entry_price - exit_price)
         pnl_net = pnl_gross - current_entry_fee - exit_fee
 
@@ -246,16 +252,16 @@ def backtest_futures_orb(
         current_initial_margin = 0.0
         current_entry_fee = 0.0
 
-    def liquidate(exit_ts: pd.Timestamp, liq_price_raw: float) -> None:
-        """
-        Conservative: margin is wiped on liquidation.
-        """
+        return float(pnl_net)
+
+    def liquidate(exit_ts: pd.Timestamp, liq_price_raw: float) -> Optional[float]:
+        """Conservative liquidation: remaining margin is wiped."""
         nonlocal side, qty, entry_price, entry_time, entry_signal_type
         nonlocal position_margin, liquidations
         nonlocal current_initial_margin, current_entry_fee
 
         if side is None or qty <= 0:
-            return
+            return None
 
         liquidations += 1
 
@@ -266,11 +272,9 @@ def backtest_futures_orb(
         exit_fee = exit_notional * fee_rate
         pay_fee(exit_fee)
 
-        # wipe remaining margin
         margin_wiped = position_margin
         position_margin = 0.0
 
-        # net pnl (very conservative): lose full initial margin + fees
         pnl_net = -current_initial_margin - current_entry_fee - exit_fee
 
         trades.append(
@@ -302,6 +306,8 @@ def backtest_futures_orb(
         current_initial_margin = 0.0
         current_entry_fee = 0.0
 
+        return float(pnl_net)
+
     for i in range(len(df)):
         ts = df.index[i]
         bar_open = float(df["open"].iloc[i])
@@ -316,9 +322,46 @@ def backtest_futures_orb(
         # Funding at bar timestamp using open as mark proxy
         apply_funding(ts, mark_price=bar_open)
 
+        # Phase 4: per-bar checks
+        if risk_mgr is not None:
+            eq_open = float(equity(mark_price=bar_open))
+            risk_mgr.on_bar(ts, current_date, eq_open)
+
+            # Unexpected position detection
+            if side is not None and qty <= 0:
+                risk_mgr._halt_global(ts, reason="unexpected_position", message="Position side set but qty <= 0")
+
+            # Exposure duration
+            if side is not None and risk_mgr.should_force_exit_exposure(i):
+                pnl_net = close_position(ts, raw_exit_price=bar_open, reason="max_exposure")
+                if pnl_net is not None:
+                    risk_mgr.record_trade_close(ts, current_date, pnl_net)
+
+            # Margin ratio spike kill switch
+            if side is not None and qty > 0:
+                if risk_mgr.check_margin_ratio(
+                    ts,
+                    current_date,
+                    side=side,
+                    qty=qty,
+                    entry_price=entry_price,
+                    position_margin=position_margin,
+                    mark_price=bar_open,
+                    mmr=mmr,
+                ):
+                    # Flatten immediately at market
+                    pnl_net = close_position(ts, raw_exit_price=bar_open, reason="kill_margin_ratio")
+                    if pnl_net is not None:
+                        risk_mgr.record_trade_close(ts, current_date, pnl_net)
+
         # Execute pending entry
         if side is None and pending_signal != 0 and pending_due_i == i:
-            if (
+            did_enter = False
+            reject_reason = ""
+
+            if risk_mgr is not None and not risk_mgr.can_enter(current_date):
+                reject_reason = "risk_halt"
+            elif (
                 pending_date in orb_ranges.index
                 and pending_date in valid_days
                 and current_date in valid_days
@@ -327,12 +370,31 @@ def backtest_futures_orb(
                 orb_high = float(orb_ranges.loc[pending_date, "orb_high"])
                 orb_low = float(orb_ranges.loc[pending_date, "orb_low"])
 
-                # lock isolated margin from FREE balance
-                margin_used = free_balance * float(cfg.position_size)
-                if margin_used > 0:
+                # Determine margin used (Phase 4 caps position size)
+                planned_margin = free_balance * float(cfg.position_size)
+                margin_used = planned_margin
+
+                if risk_mgr is not None and risk_mgr.limits.enabled:
+                    eq_now = float(equity(mark_price=bar_open))
+                    cap = float(eq_now) * float(risk_mgr.limits.max_position_margin_frac)
+                    if margin_used > cap:
+                        margin_used = cap
+                        risk_mgr._event(
+                            ts,
+                            "POSITION_SIZE_CAPPED",
+                            "Initial margin capped by risk policy",
+                            planned=float(planned_margin),
+                            capped=float(margin_used),
+                            cap=float(cap),
+                        )
+
+                margin_used = float(min(margin_used, free_balance))
+
+                if margin_used <= 0:
+                    reject_reason = "no_margin"
+                else:
                     free_balance -= margin_used
                     position_margin = margin_used
-
                     current_initial_margin = margin_used
 
                     # choose side + apply slippage at entry
@@ -355,6 +417,10 @@ def backtest_futures_orb(
                     current_entry_fee = float(notional * fee_rate)
                     pay_fee(current_entry_fee)
 
+                    # Track exposure start
+                    if risk_mgr is not None:
+                        risk_mgr.mark_position_entry(i)
+
                     # TP/SL same as your prior logic
                     if pending_signal == 1:
                         target_price = orb_high
@@ -368,6 +434,14 @@ def backtest_futures_orb(
                         pct_to_target = (entry_price - target_price) / entry_price
                         stop_loss = entry_price * (1 + pct_to_target)
 
+                    did_enter = True
+            else:
+                reject_reason = "invalid_day_or_missing_orb"
+
+            # If not entered, count reject (backtest approximation)
+            if risk_mgr is not None and risk_mgr.limits.enabled and not did_enter:
+                risk_mgr.record_order_reject(ts, current_date, reason=reject_reason or "unknown")
+
             # clear pending
             pending_signal = 0
             pending_signal_type = ""
@@ -380,29 +454,42 @@ def backtest_futures_orb(
 
             if side == "long":
                 if pd.notna(liq_px) and bar_low <= liq_px:
-                    liquidate(ts, liq_price_raw=float(liq_px))
+                    pnl_net = liquidate(ts, liq_price_raw=float(liq_px))
+                    if pnl_net is not None and risk_mgr is not None:
+                        risk_mgr.record_trade_close(ts, current_date, pnl_net)
                 else:
                     if bar_low <= stop_loss:
-                        close_position(ts, raw_exit_price=float(stop_loss), reason="stop_loss")
+                        pnl_net = close_position(ts, raw_exit_price=float(stop_loss), reason="stop_loss")
+                        if pnl_net is not None and risk_mgr is not None:
+                            risk_mgr.record_trade_close(ts, current_date, pnl_net)
                     elif bar_high >= target_price:
-                        close_position(ts, raw_exit_price=float(target_price), reason="target")
+                        pnl_net = close_position(ts, raw_exit_price=float(target_price), reason="target")
+                        if pnl_net is not None and risk_mgr is not None:
+                            risk_mgr.record_trade_close(ts, current_date, pnl_net)
             else:
                 if pd.notna(liq_px) and bar_high >= liq_px:
-                    liquidate(ts, liq_price_raw=float(liq_px))
+                    pnl_net = liquidate(ts, liq_price_raw=float(liq_px))
+                    if pnl_net is not None and risk_mgr is not None:
+                        risk_mgr.record_trade_close(ts, current_date, pnl_net)
                 else:
                     if bar_high >= stop_loss:
-                        close_position(ts, raw_exit_price=float(stop_loss), reason="stop_loss")
+                        pnl_net = close_position(ts, raw_exit_price=float(stop_loss), reason="stop_loss")
+                        if pnl_net is not None and risk_mgr is not None:
+                            risk_mgr.record_trade_close(ts, current_date, pnl_net)
                     elif bar_low <= target_price:
-                        close_position(ts, raw_exit_price=float(target_price), reason="target")
+                        pnl_net = close_position(ts, raw_exit_price=float(target_price), reason="target")
+                        if pnl_net is not None and risk_mgr is not None:
+                            risk_mgr.record_trade_close(ts, current_date, pnl_net)
 
         # Schedule pending entry (valid signal day only)
         if side is None and signal != 0 and free_balance > 0 and current_date in valid_days:
-            due = i + delay_bars
-            if due < len(df):
-                pending_signal = signal
-                pending_signal_type = signal_type
-                pending_date = current_date
-                pending_due_i = due
+            if risk_mgr is None or risk_mgr.can_enter(current_date):
+                due = i + delay_bars
+                if due < len(df):
+                    pending_signal = signal
+                    pending_signal_type = signal_type
+                    pending_date = current_date
+                    pending_due_i = due
 
         # Equity mark-to-market at close
         equity_curve.append(float(equity(mark_price=bar_close)))
@@ -411,11 +498,13 @@ def backtest_futures_orb(
     if side is not None and qty > 0:
         last_ts = df.index[-1]
         last_close = float(df["close"].iloc[-1])
-        close_position(last_ts, raw_exit_price=last_close, reason="end")
+        pnl_net = close_position(last_ts, raw_exit_price=last_close, reason="end")
+        if pnl_net is not None and risk_mgr is not None:
+            risk_mgr.record_trade_close(last_ts, df["date"].iloc[-1], pnl_net)
 
     final_equity = float(equity(mark_price=float(df["close"].iloc[-1]))) if len(df) else float(cfg.initial_capital)
 
-    stats = {
+    stats: Dict[str, Any] = {
         "final_equity": final_equity,
         "free_balance_end": float(free_balance),
         "total_fees": float(total_fees),
@@ -432,5 +521,10 @@ def backtest_futures_orb(
             "funding_series_used": cfg.funding_series is not None,
         },
     }
+
+    if risk_mgr is not None:
+        stats["risk"] = risk_mgr.snapshot()
+    else:
+        stats["risk"] = {"enabled": False}
 
     return trades, equity_curve, stats

@@ -31,6 +31,7 @@ from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ra
 
 # Futures engine (Phase 2)
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
+from backtester.risk import risk_limits_from_config  # noqa: E402
 
 
 def stable_json(obj: Any) -> str:
@@ -169,10 +170,32 @@ def get_git_info() -> Dict[str, Any]:
 
 
 def maybe_write_equity_plot(equity_df: pd.DataFrame, out_path: Path) -> None:
+    """Best-effort plot writer.
+
+    Matplotlib is optional. Some environments have binary wheels mismatches that can emit noisy
+    tracebacks on import; we suppress stderr to keep runs clean.
+    """
     try:
-        import matplotlib.pyplot as plt  # type: ignore
+        import io
+        import contextlib
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            import matplotlib
+            matplotlib.use("Agg", force=True)
+            import matplotlib.pyplot as plt  # noqa: F401
+
+        # Plot (suppress any backend noise)
+        with contextlib.redirect_stderr(io.StringIO()):
+            plt.figure()
+            plt.plot(equity_df["timestamp"], equity_df["equity"])
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            plt.savefig(out_path)
+            plt.close()
     except Exception:
         return
+
+
 
     plt.figure()
     plt.plot(equity_df["timestamp"], equity_df["equity"])
@@ -246,20 +269,36 @@ def main() -> int:
     position_size = float(cfg["risk"]["position_size"])
     taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
 
+    # Phase 4 risk controls
+    risk_limits = risk_limits_from_config(cfg)
+
     # Valid days (48 bars/day)
     valid_days = load_valid_days_csv(valid_days_path)
     print(f"✅ Valid days loaded: {len(valid_days)} ({valid_days_path})")
 
-    # Load data
-    df_raw, raw_manifest, data_dir, used_files = load_raw_dataset_from_manifest(
-        manifest_path=manifest_path,
-        data_dir_override=data_dir_override,
-        symbol=symbol,
-        timeframe=timeframe,
-    )
-    print(f"✅ Loaded candles: {len(df_raw)}  ({symbol} {timeframe})")
+    # Load data (prefer processed parquet if available)
+    processed_path = REPO_ROOT / "data" / "processed" / f"{symbol}_{timeframe}.parquet"
+    used_files: List[str] = []
+    raw_manifest: Dict[str, Any] = {}
+    data_dir: Path
 
-    # Strategy pipeline
+    if processed_path.exists():
+        df_raw = pd.read_parquet(processed_path)
+        used_files = [str(processed_path)]
+        data_dir = processed_path.parent
+        if manifest_path.exists():
+            raw_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        print(f"✅ Loaded candles: {len(df_raw)}  ({symbol} {timeframe})  [processed parquet]")
+    else:
+        df_raw, raw_manifest, data_dir, used_files = load_raw_dataset_from_manifest(
+            manifest_path=manifest_path,
+            data_dir_override=data_dir_override,
+            symbol=symbol,
+            timeframe=timeframe,
+        )
+        print(f"✅ Loaded candles: {len(df_raw)}  ({symbol} {timeframe})  [raw CSVs]")
+
+# Strategy pipeline
     df_ind = add_trend_indicators(df_raw, period=adx_period)
     orb_ranges = identify_orb_ranges(df_ind, orb_start_time=orb_start, orb_end_time=orb_end)
     orb_ranges = orb_ranges.loc[orb_ranges.index.isin(valid_days)]  # enforce valid day definition
@@ -330,6 +369,7 @@ def main() -> int:
             orb_ranges=orb_ranges,
             valid_days=valid_days,
             cfg=engine_cfg,
+            risk_limits=risk_limits,
         )
 
         total_fees_paid = float(stats.get("total_fees", 0.0))
@@ -400,8 +440,10 @@ def main() -> int:
         },
         "dataset": {
             "data_dir": str(data_dir),
-            "manifest_path": str(manifest_path),
-            "dataset_sha256": raw_manifest.get("dataset_sha256"),
+            "manifest_path": str(manifest_path) if manifest_path.exists() else None,
+            "raw_dataset_sha256": raw_manifest.get("dataset_sha256"),
+            "processed_parquet_path": str(processed_path) if processed_path.exists() else None,
+            "processed_parquet_sha256": sha256_file(processed_path) if processed_path.exists() else None,
         },
         "params": {
             "orb_start": cfg["orb"]["start"],
@@ -420,6 +462,7 @@ def main() -> int:
             "leverage": float(args.leverage),
             "mmr": float(args.mmr),
             "funding_per_8h": float(args.funding_per_8h),
+            "risk_controls": risk_limits.to_dict() if hasattr(risk_limits, "to_dict") else {},
         },
         "signal_type_counts": signal_type_counts,
         "metrics": {

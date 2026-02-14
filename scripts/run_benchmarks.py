@@ -166,16 +166,32 @@ def summarize_run(
 
 
 def maybe_write_equity_plot(equity_df: pd.DataFrame, out_path: Path) -> None:
+    """Best-effort plot writer.
+
+    Matplotlib is optional. Some environments have binary wheels mismatches that can emit noisy
+    tracebacks on import; we suppress stderr to keep runs clean.
+    """
     try:
-        import matplotlib.pyplot as plt  # type: ignore
+        import io
+        import contextlib
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            import matplotlib
+            matplotlib.use("Agg", force=True)
+            import matplotlib.pyplot as plt  # noqa: F401
+
+        # Plot (suppress any backend noise)
+        with contextlib.redirect_stderr(io.StringIO()):
+            plt.figure()
+            plt.plot(equity_df["timestamp"], equity_df["equity"])
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            plt.savefig(out_path)
+            plt.close()
     except Exception:
         return
-    plt.figure()
-    plt.plot(equity_df["timestamp"], equity_df["equity"])
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(out_path)
-    plt.close()
+
+
 
 
 class FuturesBenchmarkSim:

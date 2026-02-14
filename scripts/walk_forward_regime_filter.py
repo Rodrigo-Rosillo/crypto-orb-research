@@ -27,6 +27,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
+from backtester.risk import risk_limits_from_config  # noqa: E402
 
 
 def stable_json(obj: Any) -> str:
@@ -241,6 +242,9 @@ def main() -> int:
     position_size = float(cfg["risk"]["position_size"])
     taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
 
+    # Phase 4 risk controls
+    risk_limits = risk_limits_from_config(cfg)
+
     data_path = Path(args.data) if args.data else Path(f"data/processed/{symbol}_{timeframe}.parquet")
     data_path = (REPO_ROOT / data_path).resolve()
     if not data_path.exists():
@@ -356,6 +360,7 @@ def main() -> int:
             orb_ranges=orb_ranges,
             valid_days=valid_test_days,  # still the data-quality policy
             cfg=fut_cfg,
+            risk_limits=risk_limits,
         )
 
         trades_df = pd.DataFrame(trades)

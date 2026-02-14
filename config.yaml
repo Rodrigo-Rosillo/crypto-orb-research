@@ -26,3 +26,20 @@ fees:
 leverage:
   enabled: false
   max_leverage: 1              # keep 1 if disabled
+
+# Phase 4: risk controls (disabled by default for research)
+risk_controls:
+  enabled: false
+
+  # Hard controls
+  max_position_margin_frac: 0.25   # cap initial margin per trade (fraction of equity)
+  max_leverage: 2.0                # cap leverage (engine will clamp)
+  max_daily_loss_pct: 0.03         # stop trading for the day after -3% equity
+  max_drawdown_pct: 0.20           # global circuit breaker after -20% from peak
+  max_consecutive_losses: 4        # stop trading for the day
+  max_exposure_bars: 48            # max bars in position (48 x 30m = 24h)
+
+  kill_switch:
+    max_data_gap_bars: 2           # data feed stale if gap > 2 bars
+    max_order_rejects_per_day: 3   # backtest approximation
+    max_margin_ratio: 0.85         # maintenance / margin_balance threshold
