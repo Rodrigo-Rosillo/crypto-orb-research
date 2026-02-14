@@ -1,0 +1,69 @@
+# Phase 5 preset: forward test (paper/shadow)
+#
+# This file is a convenience preset. You can also use config.yaml or config_phase4.yaml;
+# scripts/forward_test.py will apply reasonable defaults if `forward_test:` is missing.
+
+symbol: SOLUSDT
+timeframe: 30m
+
+timezone:
+  data_timezone: "UTC"
+  orb_times_timezone: "UTC"
+
+orb:
+  start: "13:30"
+  end: "14:00"
+  cutoff: "14:00"
+
+adx:
+  period: 14
+  threshold: 43
+
+risk:
+  initial_capital: 10000
+  # For forward tests, keep sizing conservative. This is a *fraction of free balance used as initial margin*.
+  position_size: 0.20
+
+fees:
+  taker_fee_rate: 0.0005
+
+leverage:
+  enabled: true
+  max_leverage: 1
+
+# Phase 4 risk controls (recommended ON for forward tests)
+risk_controls:
+  enabled: true
+  max_position_margin_frac: 0.15
+  max_leverage: 2.0
+  max_daily_loss_pct: 0.02
+  max_drawdown_pct: 0.15
+  max_consecutive_losses: 3
+  max_exposure_bars: 48
+  kill_switch:
+    max_data_gap_bars: 2
+    max_order_rejects_per_day: 2
+    max_margin_ratio: 0.80
+
+# Phase 5 forward test settings
+forward_test:
+  # Mode:
+  #   - shadow: generate orders, simulate fills (no exchange)
+  #   - testnet: send orders to an exchange testnet (implemented in Phase 5 later steps)
+  mode: shadow
+
+  # Source:
+  #   - replay: read candles from local parquet (deterministic)
+  #   - live: connect to live market data (implemented in Phase 5 later steps)
+  source: replay
+
+  # Output root (a run_id folder will be created under this)
+  out_dir: reports/forward_test
+
+  # How many recent bars to keep for indicator context
+  bar_lookback: 1000
+
+  # Shadow execution model defaults (kept aligned with backtest assumptions)
+  execution_model:
+    delay_bars: 1
+    slippage_bps: 0

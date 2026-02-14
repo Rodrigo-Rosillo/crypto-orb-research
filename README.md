@@ -408,3 +408,17 @@ If you change **anything** (data, config, code), expect hashes and metrics to ch
   The tuner enforces `--min-trades` (default 20). Lower it only for diagnostics.
 
 ---
+
+---
+
+## Phase 5 — Forward test (paper/shadow)
+
+Phase 5 validates the end-to-end pipeline in live-like conditions.
+
+Create a forward-test run folder (Step 1 scaffolding):
+```bash
+python scripts/forward_test.py --config config_forward_test.yaml --mode shadow --source replay
+```
+
+This creates a timestamped run folder under `reports/forward_test/` with CSV/JSONL placeholders.
+
