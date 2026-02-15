@@ -65,7 +65,7 @@ def write_skeleton(run_dir: Path) -> None:
         "timestamp_utc,symbol,side,reason,adx,orb_low,orb_high,close\n", encoding="utf-8"
     )
     (run_dir / "orders.csv").write_text(
-        "timestamp_utc,due_timestamp_utc,order_id,symbol,side,qty,order_type,limit_price,status,reason\n",
+        "timestamp_utc,due_timestamp_utc,order_id,symbol,side,qty,order_type,limit_price,status,status_detail,reason\n",
         encoding="utf-8",
     )
     (run_dir / "fills.csv").write_text(
@@ -179,6 +179,7 @@ def main() -> int:
         "order_type",
         "limit_price",
         "status",
+        "status_detail",
         "reason",
     ]
     fills_cols = ["timestamp_utc", "order_id", "symbol", "side", "qty", "fill_price", "fee", "slippage_bps", "exec_model"]
@@ -274,6 +275,8 @@ def main() -> int:
         )
 
         # Artifacts
+
+        risk_ev = (shadow_res.stats.get("risk") or {}).get("events") if isinstance(shadow_res.stats, dict) else None
         signals_df = build_signals_df(shadow_res.df_sig, symbol=symbol)
         orders_df, fills_df, positions_df, derived_events = build_orders_fills_positions(
             df_sig=shadow_res.df_sig,
@@ -281,10 +284,10 @@ def main() -> int:
             equity_curve=shadow_res.equity_curve,
             symbol=symbol,
             delay_bars=delay_bars,
+            valid_days=valid_days,
+            risk_events=risk_ev,
         )
-
         # Add risk events (if any)
-        risk_ev = (shadow_res.stats.get("risk") or {}).get("events") if isinstance(shadow_res.stats, dict) else None
         if isinstance(risk_ev, list):
             for e in risk_ev:
                 events.append({"ts": str(e.get("ts", "")), "type": "RISK", **e})

@@ -36,7 +36,7 @@ leverage:
 
 # Phase 4 risk controls (recommended ON for forward tests)
 risk_controls:
-  enabled: false
+  enabled: true
   max_position_margin_frac: 0.95
   max_leverage: 2.0
   max_daily_loss_pct: 0.03

@@ -74,29 +74,82 @@ def build_orders_fills_positions(
     equity_curve: pd.Series,
     symbol: str,
     delay_bars: int,
+    valid_days: Optional[set] = None,
+    risk_events: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, List[Dict[str, Any]]]:
     """Create forward-test artifacts from a deterministic shadow replay run."""
     events: List[Dict[str, Any]] = []
 
     sig_rows = df_sig[df_sig["signal"].astype(int) != 0].copy()
 
-    # Map trades by entry date + signal_type (your strategy emits <=1 signal/day)
-    trade_by_date: Dict[Tuple[Any, str], Dict[str, Any]] = {}
+    # Map trades by entry timestamp (UTC) + signal_type.
+    # NOTE: Mapping by entry *date* can mis-label signals that execute after midnight
+    # (e.g., 23:30 signal with delay_bars=1 enters at 00:00 next day).
+    trade_by_entry: Dict[Tuple[pd.Timestamp, str], Dict[str, Any]] = {}
+    trade_by_entry_ts_only: Dict[pd.Timestamp, Dict[str, Any]] = {}
     for i, t in enumerate(trades):
         et = t.get("entry_time")
         st = str(t.get("signal_type", ""))
         if isinstance(et, pd.Timestamp):
-            d = et.date()
-        else:
-            d = None
-        if d is not None:
-            trade_by_date[(d, st)] = {**t, "_trade_index": i, "_trade_id": _trade_id(t, i)}
+            et_utc = et.tz_convert("UTC")
+            payload = {**t, "_trade_index": i, "_trade_id": _trade_id(t, i)}
+            trade_by_entry[(et_utc, st)] = payload
+            # Fallback (assumes <= 1 trade per entry timestamp)
+            trade_by_entry_ts_only[et_utc] = payload
 
     orders_out: List[Dict[str, Any]] = []
     fills_out: List[Dict[str, Any]] = []
     positions_out: List[Dict[str, Any]] = []
 
-    # Orders derived from signals (scheduled at signal time; filled only if a trade exists)
+    
+    # Pre-compute open-position intervals to explain skipped signals.
+    open_intervals: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    for _t in trades:
+        _et = _t.get("entry_time")
+        _xt = _t.get("exit_time")
+        if isinstance(_et, pd.Timestamp) and isinstance(_xt, pd.Timestamp):
+            try:
+                open_intervals.append((_et.tz_convert("UTC"), _xt.tz_convert("UTC")))
+            except Exception:
+                pass
+
+    def _position_open(at_ts_utc: pd.Timestamp) -> bool:
+        for a, b in open_intervals:
+            if a <= at_ts_utc < b:
+                return True
+        return False
+
+    # Risk-derived hints (optional). Useful when risk controls prevent scheduling/execution.
+    global_halt_ts: Optional[pd.Timestamp] = None
+    day_halt_ts: Dict[str, pd.Timestamp] = {}
+    reject_reason_by_ts: Dict[pd.Timestamp, str] = {}
+
+    if isinstance(risk_events, list):
+        for e in risk_events:
+            kind = str(e.get("kind", ""))
+            ts_s = e.get("ts")
+            try:
+                ts_e = pd.Timestamp(ts_s)
+                if ts_e.tzinfo is None:
+                    ts_e = ts_e.tz_localize("UTC")
+                else:
+                    ts_e = ts_e.tz_convert("UTC")
+            except Exception:
+                continue
+
+            if kind == "HALT_GLOBAL":
+                if global_halt_ts is None or ts_e < global_halt_ts:
+                    global_halt_ts = ts_e
+            elif kind == "HALT_DAY":
+                d = str(e.get("day", ""))
+                if d:
+                    prev = day_halt_ts.get(d)
+                    if prev is None or ts_e < prev:
+                        day_halt_ts[d] = ts_e
+            elif kind == "ORDER_REJECT":
+                reject_reason_by_ts[ts_e] = str(e.get("reason", ""))
+
+# Orders derived from signals (scheduled at signal time; filled only if a trade exists)
     for ts, row in sig_rows.iterrows():
         sig_date = row["date"]
         sig_type = str(row.get("signal_type", ""))
@@ -112,7 +165,14 @@ def build_orders_fills_positions(
         except Exception:
             due_ts = None
 
-        trade = trade_by_date.get((sig_date, sig_type))
+        trade = None
+        if due_ts is not None:
+            try:
+                due_utc = pd.Timestamp(due_ts).tz_convert('UTC')
+            except Exception:
+                due_utc = None
+            if due_utc is not None:
+                trade = trade_by_entry.get((due_utc, sig_type)) or trade_by_entry_ts_only.get(due_utc)
         status = "scheduled"
         order_id = f"SIG_{pd.Timestamp(ts).tz_convert('UTC').strftime('%Y%m%dT%H%M%SZ')}_{sig_type}".replace(
             " ", ""
@@ -125,6 +185,62 @@ def build_orders_fills_positions(
             qty = float(trade.get("qty", 0.0))
             order_id = str(trade.get("_trade_id")) + "_ENTRY"
 
+        status_detail = ""
+        if trade is None:
+            ts_utc = pd.Timestamp(ts).tz_convert("UTC")
+            if due_ts is None:
+                status_detail = "missing_due_bar"
+            else:
+                # Determine the signal day / due day for validity checks
+                sig_day = row.get("date")
+                try:
+                    due_day = pd.Timestamp(due_ts).tz_convert("UTC").date()
+                except Exception:
+                    due_day = None
+
+                # Most common: signal ignored because a prior position was open
+                if _position_open(ts_utc):
+                    status_detail = "position_open"
+
+                # Next: invalid execution day (entry bar falls on invalid/missing day)
+                if not status_detail and valid_days is not None and due_day is not None:
+                    try:
+                        if sig_day not in valid_days:
+                            status_detail = "invalid_signal_day"
+                        elif due_day not in valid_days:
+                            status_detail = "invalid_execution_day"
+                    except Exception:
+                        pass
+
+                # Risk halts (if risk events provided)
+                if not status_detail:
+                    sig_day_str = str(sig_day) if sig_day is not None else str(ts_utc.date())
+                    due_day_str = str(due_day) if due_day is not None else ""
+                    if global_halt_ts is not None and global_halt_ts <= ts_utc:
+                        status_detail = "risk_halt_global"
+                    elif sig_day_str in day_halt_ts and day_halt_ts[sig_day_str] <= ts_utc:
+                        status_detail = "risk_halt_day"
+                    else:
+                        try:
+                            due_utc = pd.Timestamp(due_ts).tz_convert("UTC")
+                            if due_day_str in day_halt_ts and day_halt_ts[due_day_str] <= due_utc:
+                                status_detail = "risk_halt_day_due"
+                        except Exception:
+                            pass
+
+                # Engine-level reject reason (best-effort, only available when risk events exist)
+                if not status_detail:
+                    try:
+                        due_utc = pd.Timestamp(due_ts).tz_convert("UTC")
+                        rr = reject_reason_by_ts.get(due_utc)
+                        if rr:
+                            status_detail = f"engine_reject:{rr}"
+                    except Exception:
+                        pass
+
+                if not status_detail:
+                    status_detail = "unknown"
+
         orders_out.append(
             {
                 "timestamp_utc": ts.tz_convert("UTC").isoformat(),
@@ -136,6 +252,7 @@ def build_orders_fills_positions(
                 "order_type": "market",
                 "limit_price": "",
                 "status": status,
+                "status_detail": status_detail,
                 "reason": sig_type,
             }
         )
