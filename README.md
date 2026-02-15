@@ -415,10 +415,22 @@ If you change **anything** (data, config, code), expect hashes and metrics to ch
 
 Phase 5 validates the end-to-end pipeline in live-like conditions.
 
-Create a forward-test run folder (Step 1 scaffolding):
+Run a deterministic replay forward-test (Step 2: replay + shadow execution):
 ```bash
 python scripts/forward_test.py --config config_forward_test.yaml --mode shadow --source replay
 ```
 
-This creates a timestamped run folder under `reports/forward_test/` with CSV/JSONL placeholders.
+This creates a timestamped run folder under `reports/forward_test/` with:
+
+- `signals.csv` — strategy signals (timestamped)
+- `orders.csv` — shadow “orders” (scheduled at signal time; filled if executed)
+- `fills.csv` — hypothetical fills (entry/exit)
+- `positions.csv` — basic position snapshots (entry/exit)
+- `events.jsonl` — structured event log (signals/fills/risk events)
+- `shadow_stats.json` — engine stats (fees, liquidations, risk snapshot)
+
+Optional: run only a window of the dataset:
+```bash
+python scripts/forward_test.py --config config_forward_test.yaml --mode shadow --source replay --start 2025-01-01 --end 2025-06-30
+```
 

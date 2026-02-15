@@ -1,27 +1,34 @@
 {
   "config_path": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\config_forward_test.yaml",
-  "config_sha256": "e459dcd542de81c7577d7500e87f50b34e1ac3c174c184bb99451d74ecc862d5",
+  "config_sha256": "2451cb8b4a35a9d5ba3613b20cb420d0c88e6ea6e7d8167cbd19af75a41a1bdd",
+  "dataset": {
+    "end_utc": null,
+    "processed_parquet": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\processed\\SOLUSDT_30m.parquet",
+    "processed_parquet_sha256": "b2dce487c161167b031d52b37c7e31ff4f2a884d5591a786686e28a8cf66658a",
+    "rows_used": 88883,
+    "start_utc": null
+  },
   "mode": "shadow",
-  "note": "Phase 5 Step 1: scaffolding only (no live ingestion / no broker yet).",
+  "note": "Phase 5 Step 2: replay source + shadow execution (deterministic).",
   "out_dir": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\forward_test\\20260214T222953Z",
   "platform": "Windows-10-10.0.19045-SP0",
   "python": "3.13.12 (tags/v3.13.12:1cbe481, Feb  3 2026, 18:22:25) [MSC v.1944 64 bit (AMD64)]",
-  "repo_git_head": "25ad9c9fb32cfbe685bde748edf169ce0470201c",
+  "repo_git_head": "b79e3ee3acbbe47ce427f05699793c7aecb1748b",
   "risk_limits": {
-    "enabled": true,
+    "enabled": false,
     "kill_switch": {
-      "max_data_gap_bars": 2,
-      "max_margin_ratio": 0.8,
+      "max_data_gap_bars": 200,
+      "max_margin_ratio": 10.0,
       "max_order_rejects_per_day": 2
     },
-    "max_consecutive_losses": 3,
-    "max_daily_loss_pct": 0.02,
-    "max_drawdown_pct": 0.15,
-    "max_exposure_bars": 48,
+    "max_consecutive_losses": 4,
+    "max_daily_loss_pct": 0.03,
+    "max_drawdown_pct": 0.3,
+    "max_exposure_bars": 336,
     "max_leverage": 2.0,
-    "max_position_margin_frac": 0.15
+    "max_position_margin_frac": 0.95
   },
   "run_id": "20260214T222953Z",
   "source": "replay",
-  "started_utc": "2026-02-14T22:29:53.546457+00:00"
+  "started_utc": "2026-02-14T23:27:29.205232+00:00"
 }

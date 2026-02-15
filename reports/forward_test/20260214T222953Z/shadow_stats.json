@@ -1,0 +1,20 @@
+{
+  "assumptions": {
+    "delay_bars": 1,
+    "fee_rate_effective": 0.0005,
+    "funding_rate_per_8h": 0.0,
+    "funding_series_used": false,
+    "leverage": 1.0,
+    "mmr": 0.005,
+    "slippage_bps": 0.0
+  },
+  "final_equity": 12850.250135101729,
+  "free_balance_end": 12850.250135101729,
+  "liquidations": 0,
+  "risk": {
+    "enabled": false
+  },
+  "total_fees": 379.8153419983582,
+  "total_funding": 0.0,
+  "trades": 164
+}

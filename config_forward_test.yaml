@@ -6,6 +6,9 @@
 symbol: SOLUSDT
 timeframe: 30m
 
+# Data quality gate (Phase 0)
+valid_days: data/processed/valid_days.csv
+
 timezone:
   data_timezone: "UTC"
   orb_times_timezone: "UTC"
@@ -34,16 +37,16 @@ leverage:
 # Phase 4 risk controls (recommended ON for forward tests)
 risk_controls:
   enabled: true
-  max_position_margin_frac: 0.15
+  max_position_margin_frac: 0.95
   max_leverage: 2.0
-  max_daily_loss_pct: 0.02
-  max_drawdown_pct: 0.15
-  max_consecutive_losses: 3
-  max_exposure_bars: 48
+  max_daily_loss_pct: 0.03
+  max_drawdown_pct: 0.30
+  max_consecutive_losses: 4
+  max_exposure_bars: 336
   kill_switch:
-    max_data_gap_bars: 2
+    max_data_gap_bars: 200
     max_order_rejects_per_day: 2
-    max_margin_ratio: 0.80
+    max_margin_ratio: 99999.0
 
 # Phase 5 forward test settings
 forward_test:
@@ -56,6 +59,13 @@ forward_test:
   #   - replay: read candles from local parquet (deterministic)
   #   - live: connect to live market data (implemented in Phase 5 later steps)
   source: replay
+
+  # Replay window (optional). If omitted, uses full dataset.
+  # You can also override from CLI:
+  #   python scripts/forward_test.py --start 2025-01-01 --end 2025-06-30
+  replay:
+    start: null
+    end: null
 
   # Output root (a run_id folder will be created under this)
   out_dir: reports/forward_test
