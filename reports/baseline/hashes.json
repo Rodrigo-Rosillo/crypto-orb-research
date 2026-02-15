@@ -1,9 +1,9 @@
 {
-  "equity_curve.csv": "f09c8de62bafe251adcd508beeeb88b32e34fe88c3a450a9543f71088b241123",
-  "equity_curve.png": "26420f334b526cead8b675369213cb48561d0df52a06e4b71bbf3bf5d6e6ec4b",
-  "hashes.json": "99f2bef232f9f15e1000844dfd81ded0197a22f64e7d83fd6503f9c901b393b5",
+  "equity_curve.csv": "229b8539f53496edd9266bdf0e30201d2d908d5a8aa5558cdedcb787b3010fcf",
+  "equity_curve.png": "43b64d7c9b4cff7df36250d3303d730577407aacdddbebe96821d969069f8dd0",
+  "hashes.json": "b8cd18a401d77ac711f752ce28ea9e6169bdba00dfa454a8751155d3e2b6e700",
   "orb_ranges.csv": "cd94e2fc7162fa7ae9b6d31bd9a0a4538f895351762d5a5b6bb2356e2379d47b",
-  "results.json": "2a1c985652cf1fed5812697bba13a0a42eb8483bd93f311ce3d216309145afc2",
-  "run_metadata.json": "17a0fa6463467fd35d4086de64fed4fcee2269e775bd85876a3f0820a9501cdd",
-  "trades.csv": "5e1571f778b4dc0c35ea895cfa63d1af06ae30ac3e806253747328ec5f847b1d"
+  "results.json": "36b53c859c767501d184b37282a655c9c3bcd8e68c5fbd44f6239df9d4b4db09",
+  "run_metadata.json": "a69d55c24cf3e75d28f60d5ee9c3ad898ee2289586cc95ab5c0489c81035cf31",
+  "trades.csv": "a36cb867d43c6b9266d86c7f1c1a75a98dcfbd7ab0b0ae18326867750a6925b9"
 }

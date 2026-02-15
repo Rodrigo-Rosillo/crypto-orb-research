@@ -434,3 +434,16 @@ Optional: run only a window of the dataset:
 python scripts/forward_test.py --config config_forward_test.yaml --mode shadow --source replay --start 2025-01-01 --end 2025-06-30
 ```
 
+Acceptance check (Phase 5 / Step 2): compare forward-test vs baseline
+
+```bash
+# Compare the latest forward-test run folder automatically
+python scripts/compare_forward_vs_baseline.py
+
+# Or specify a run id
+python scripts/compare_forward_vs_baseline.py --run-id 20260214T222953Z
+
+# Strict mode also requires qty + fees to match (use only when leverage/sizing configs are identical)
+python scripts/compare_forward_vs_baseline.py --run-id 20260214T222953Z --strict
+```
+

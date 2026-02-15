@@ -1,4 +1,4 @@
-{"ts": "2026-02-15T00:25:01.337393+00:00", "type": "RUN_START", "mode": "shadow", "source": "replay", "rows": 88883, "start_utc": "", "end_utc": ""}
+{"ts": "2026-02-15T01:05:08.201580+00:00", "type": "RUN_START", "mode": "shadow", "source": "replay", "rows": 88883, "start_utc": "", "end_utc": ""}
 {"ts": "2021-01-01T00:30:00+00:00", "type": "RISK", "kind": "DAY_START", "message": "New UTC day", "day": "2021-01-01", "day_start_equity": 10000.0}
 {"ts": "2021-01-02T00:00:00+00:00", "type": "RISK", "kind": "DAY_START", "message": "New UTC day", "day": "2021-01-02", "day_start_equity": 10000.0}
 {"ts": "2021-01-03T00:00:00+00:00", "type": "RISK", "kind": "DAY_START", "message": "New UTC day", "day": "2021-01-03", "day_start_equity": 10000.0}
@@ -2509,4 +2509,4 @@
 {"ts": "2026-01-29T15:30:00+00:00", "type": "FILL", "symbol": "SOLUSDT", "trade_id": "T00162_20260129T153000Z_downtrend_breakdown", "leg": "exit", "side": "buy", "qty": 21.5314727004372, "price": 116.09079999999999, "reason": "target", "pnl_net": 48.4872530483431}
 {"ts": "2026-01-31T16:00:00+00:00", "type": "FILL", "symbol": "SOLUSDT", "trade_id": "T00163_20260131T160000Z_downtrend_breakdown", "leg": "entry", "side": "sell", "qty": 23.579993614878052, "price": 108.58}
 {"ts": "2026-01-31T16:30:00+00:00", "type": "FILL", "symbol": "SOLUSDT", "trade_id": "T00163_20260131T160000Z_downtrend_breakdown", "leg": "exit", "side": "buy", "qty": 23.579993614878052, "price": 106.4084, "reason": "target", "pnl_net": 48.67160158443271}
-{"ts": "2026-02-15T00:25:16.311989+00:00", "type": "RUN_END", "final_equity": 12850.250135101729, "trades": 164}
+{"ts": "2026-02-15T01:05:22.881689+00:00", "type": "RUN_END", "final_equity": 12850.250135101729, "trades": 164}
