@@ -32,6 +32,7 @@ from forward.artifacts import (  # noqa: E402
 from forward.replay import load_processed_parquet  # noqa: E402
 from forward.shadow import run_shadow_futures  # noqa: E402
 from forward.live_shadow import run_live_shadow  # noqa: E402
+from forward.live_testnet import run_live_testnet  # noqa: E402
 from forward.utils import ensure_repo_path, maybe_get_forward_cfg, parse_hhmm, parse_utc_ts, utc_run_id  # noqa: E402
 
 
@@ -140,6 +141,13 @@ def main() -> int:
         type=int,
         default=None,
         help="(live) Stop after N minutes of wall-clock time.",
+    )
+
+    # Testnet mode controls
+    parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help="(testnet) Place a tiny test order on Binance Futures TESTNET and exit.",
     )
     args = parser.parse_args()
 
@@ -381,6 +389,57 @@ def main() -> int:
             )
         )
 
+    elif source == "live" and mode == "testnet":
+        note = "Phase 5 Step 4: live source + Binance futures TESTNET order placement."
+
+        symbol = str(cfg.get("symbol", "SOLUSDT"))
+        timeframe = str(cfg.get("timeframe", "30m"))
+
+        orb_start = parse_hhmm(cfg["orb"]["start"])
+        orb_end = parse_hhmm(cfg["orb"]["end"])
+        orb_cutoff = parse_hhmm(cfg["orb"]["cutoff"])
+
+        adx_period = int(cfg["adx"]["period"])
+        adx_threshold = float(cfg["adx"]["threshold"])
+
+        initial_capital = float(cfg["risk"]["initial_capital"])
+        position_size = float(cfg["risk"]["position_size"])
+        taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
+
+        lev_cfg = cfg.get("leverage") or {}
+        leverage = float(lev_cfg.get("max_leverage", 1.0)) if bool(lev_cfg.get("enabled", True)) else 1.0
+
+        exec_cfg = (ft_cfg.get("execution_model") or {}) if isinstance(ft_cfg, dict) else {}
+        delay_bars = int(exec_cfg.get("delay_bars", 1))
+        slippage_bps = float(exec_cfg.get("slippage_bps", 0.0))
+
+        write_skeleton(run_dir)
+
+        asyncio.run(
+            run_live_testnet(
+                run_dir=run_dir,
+                cfg=cfg,
+                ft_cfg=ft_cfg,
+                risk_limits=risk_limits,
+                symbol=symbol,
+                timeframe=timeframe,
+                orb_start=orb_start,
+                orb_end=orb_end,
+                orb_cutoff=orb_cutoff,
+                adx_period=adx_period,
+                adx_threshold=adx_threshold,
+                initial_capital=initial_capital,
+                position_size=position_size,
+                taker_fee_rate=taker_fee_rate,
+                leverage=leverage,
+                delay_bars=delay_bars,
+                slippage_bps=slippage_bps,
+                max_bars=args.max_bars,
+                duration_minutes=args.duration_minutes,
+                smoke_test=bool(args.smoke_test),
+            )
+        )
+
     else:
         # Other combinations are wired in later Phase 5 steps.
         note = f"Not implemented yet: mode={mode}, source={source}. Implemented: replay+shadow (Step 2), live+shadow (Step 3)."
@@ -430,6 +489,8 @@ def main() -> int:
         print("[forward_test] ✅ replay+shadow run completed.")
     elif source == "live" and mode == "shadow":
         print("[forward_test] ✅ live+shadow run completed.")
+    elif source == "live" and mode == "testnet":
+        print("[forward_test] ✅ live+testnet run completed.")
     else:
         print("[forward_test] ℹ️ Not implemented for this mode/source yet.")
     return 0

@@ -476,3 +476,43 @@ Acceptance check (Phase 5 / Step 3):
   - the runner should reconnect and resume without duplicating candles
   - `events.jsonl` will show heartbeat warnings if data pauses
 
+### Step 4: Testnet broker (optional second mode)
+
+This step adds a **Binance USD-M futures TESTNET broker**. Market data is still taken from Binance live klines.
+
+**Secrets (required)**
+
+Set these environment variables (never put keys in config files):
+
+- `BINANCE_TESTNET_API_KEY`
+- `BINANCE_TESTNET_API_SECRET`
+
+**Smoke test (places a tiny testnet order and flattens it)**
+
+1) Set config:
+- `forward_test.mode: testnet`
+- `forward_test.source: live`
+
+2) Run:
+```bash
+python scripts/forward_test.py --config config_forward_test.yaml --mode testnet --source live --smoke-test
+```
+
+Check `reports/forward_test/<RUN_ID>/events.jsonl` for:
+- `TESTNET_SMOKE_START`
+- `TESTNET_SMOKE_ENTRY`
+- `TESTNET_SMOKE_FLATTEN`
+- `LIVE_RUN_END`
+
+**Live testnet run (strategy-driven)**
+
+```bash
+python scripts/forward_test.py --config config_forward_test.yaml --mode testnet --source live --duration-minutes 180
+```
+
+Acceptance check (Phase 5 / Step 4):
+- you can place a tiny testnet order (smoke test)
+- reconciliation confirms exchange position matches internal state (see `state.json` + `positions.csv`)
+- forced restart resumes safely:
+  - stop the program, then re-run with the same `--run-id` and it should load `state.json` and reconcile
+

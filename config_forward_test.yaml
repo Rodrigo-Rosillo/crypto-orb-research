@@ -89,6 +89,30 @@ forward_test:
     # How often to check for staleness (seconds)
     stale_check_interval_seconds: 30
 
+  # Binance Futures TESTNET settings (Step 4)
+  # IMPORTANT: API keys must be provided via env vars, never config files:
+  #   - BINANCE_TESTNET_API_KEY
+  #   - BINANCE_TESTNET_API_SECRET
+  testnet:
+    # USD-M futures testnet base URL
+    base_url: "https://testnet.binancefuture.com"
+    recv_window_ms: 5000
+    # How often to poll order/position status during live runs (seconds)
+    poll_interval_seconds: 2
+    # Cancel open reduce-only TP/SL orders when the script exits
+    cancel_open_orders_on_exit: true
+    # If state/exchange mismatch is detected at startup, optionally flatten and exit (safer = false)
+    flatten_on_mismatch: false
+
+    # Smoke test (places tiny order then flattens)
+    smoke_qty: 0.10
+    smoke_auto_flatten: true
+
+    # Rate limit / retry tuning
+    max_retries: 6
+    base_backoff_seconds: 0.5
+    max_backoff_seconds: 20
+
   # Shadow execution model defaults (kept aligned with backtest assumptions)
   execution_model:
     delay_bars: 1
