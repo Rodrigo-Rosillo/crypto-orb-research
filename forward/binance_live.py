@@ -98,76 +98,102 @@ class BinanceLiveKlineSource:
             return f"wss://stream.binance.com:9443/ws/{sym}@kline_{self.interval}"
         raise ValueError("market must be 'futures' or 'spot'")
 
+    
     async def stream_closed(self, stop_event: Optional[asyncio.Event] = None) -> AsyncIterator[LiveBar]:
-        """Async iterator of LiveBar objects (closed candles only)."""
+        """Async iterator of LiveBar objects (closed candles only).
+
+        Implementation notes:
+          - Yields only bars where the kline payload has x=True (closed).
+          - De-dupes by candle open_time (monotonic increasing).
+          - Includes reconnect logic with jittered exponential backoff.
+
+        Shutdown notes (Windows-friendly):
+          - We avoid relying on the async generator's implicit `aclose()` to unwind an
+            `async with websockets.connect(...)` context, because on some platforms the
+            close handshake can hang the shutdown path.
+          - Instead, we manage the websocket lifecycle explicitly and bound the close
+            time with a short timeout, so STOP_DURATION / stop_event exits promptly.
+        """
         stop_event = stop_event or asyncio.Event()
         url = self.ws_url()
         backoff = 1.0
 
+        # Poll ws.recv() with a short timeout so we can notice stop_event promptly.
+        recv_poll_seconds = 1.0
+
         while not stop_event.is_set():
+            ws = None
             try:
-                async with websockets.connect(
+                ws = await websockets.connect(
                     url,
                     ping_interval=self.ping_interval,
                     ping_timeout=self.ping_timeout,
-                    close_timeout=10,
+                    close_timeout=5,
                     max_queue=1024,
-                ) as ws:
-                    self.last_connect_at = _utcnow()
-                    self.connect_count += 1
-                    self.last_error = None
-                    backoff = 1.0
-                    async for msg in ws:
-                        if stop_event.is_set():
-                            break
+                )
 
-                        # Update heartbeat on *any* websocket message
-                        self.last_message_at = _utcnow()
+                self.last_connect_at = _utcnow()
+                self.connect_count += 1
+                self.last_error = None
+                backoff = 1.0
 
-                        try:
-                            data = json.loads(msg)
-                        except Exception:
-                            continue
+                while not stop_event.is_set():
+                    try:
+                        msg = await asyncio.wait_for(ws.recv(), timeout=recv_poll_seconds)
+                    except asyncio.TimeoutError:
+                        continue
+                    except (asyncio.CancelledError, GeneratorExit):
+                        break
+                    except Exception:
+                        # recv failed -> reconnect
+                        break
 
-                        k = data.get("k") if isinstance(data, dict) else None
-                        if not isinstance(k, dict):
-                            continue
+                    # Heartbeat on any message
+                    self.last_message_at = _utcnow()
 
-                        # Only closed candles
-                        if not bool(k.get("x", False)):
-                            continue
+                    try:
+                        data = json.loads(msg)
+                    except Exception:
+                        continue
 
-                        # Times (ms)
-                        try:
-                            open_ts = pd.to_datetime(int(k["t"]), unit="ms", utc=True)
-                            close_ts = pd.to_datetime(int(k["T"]), unit="ms", utc=True)
-                        except Exception:
-                            continue
+                    k = data.get("k") if isinstance(data, dict) else None
+                    if not isinstance(k, dict):
+                        continue
 
-                        # De-dupe / ordering
-                        if self._last_emitted_open is not None and open_ts <= self._last_emitted_open:
-                            continue
-                        self._last_emitted_open = open_ts
+                    # Only closed candles
+                    if not bool(k.get("x", False)):
+                        continue
 
-                        try:
-                            bar = LiveBar(
-                                symbol=self.symbol,
-                                interval=self.interval,
-                                open_time=open_ts,
-                                close_time=close_ts,
-                                open=float(k.get("o")),
-                                high=float(k.get("h")),
-                                low=float(k.get("l")),
-                                close=float(k.get("c")),
-                                volume=float(k.get("v", 0.0)),
-                            )
-                        except Exception:
-                            continue
+                    # Times (ms)
+                    try:
+                        open_ts = pd.to_datetime(int(k["t"]), unit="ms", utc=True)
+                        close_ts = pd.to_datetime(int(k["T"]), unit="ms", utc=True)
+                    except Exception:
+                        continue
 
-                        yield bar
+                    # De-dupe / ordering
+                    if self._last_emitted_open is not None and open_ts <= self._last_emitted_open:
+                        continue
+                    self._last_emitted_open = open_ts
+
+                    try:
+                        bar = LiveBar(
+                            symbol=self.symbol,
+                            interval=self.interval,
+                            open_time=open_ts,
+                            close_time=close_ts,
+                            open=float(k.get("o")),
+                            high=float(k.get("h")),
+                            low=float(k.get("l")),
+                            close=float(k.get("c")),
+                            volume=float(k.get("v", 0.0)),
+                        )
+                    except Exception:
+                        continue
+
+                    yield bar
 
             except Exception:
-                # Reconnect with jittered exponential backoff
                 if stop_event.is_set():
                     break
                 self.last_error = "websocket_disconnect"
@@ -175,6 +201,15 @@ class BinanceLiveKlineSource:
                 sleep_s = sleep_s + random.random()  # jitter
                 await asyncio.sleep(sleep_s)
                 backoff = min(backoff * 2.0, float(self.max_backoff_seconds))
+
+            finally:
+                if ws is not None:
+                    # Bound close time so process can exit promptly.
+                    try:
+                        await asyncio.wait_for(ws.close(), timeout=1.5)
+                    except Exception:
+                        pass
+
 
 
 def fetch_recent_klines_df(
@@ -231,6 +266,9 @@ def fetch_recent_klines_df(
         except Exception:
             continue
 
+    last_close_time: Optional[pd.Timestamp] = None
+    last_open_time: Optional[pd.Timestamp] = None
+
     if not rows:
         df = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         df.index = pd.DatetimeIndex([], tz="UTC")
@@ -240,6 +278,14 @@ def fetch_recent_klines_df(
         # Keep only closed candles (close_time <= now) for bootstrapping.
         now = pd.Timestamp(_utcnow())
         df = df[df["close_time"] <= now]
+
+        if len(df.index):
+            last_open_time = df.index[-1]
+            try:
+                last_close_time = pd.to_datetime(df["close_time"].iloc[-1], utc=True)
+            except Exception:
+                last_close_time = None
+
         df = df.drop(columns=["close_time"])
 
     meta = {
@@ -250,6 +296,30 @@ def fetch_recent_klines_df(
         "limit": limit,
         "market": market,
         "rows": int(len(df)),
+        "last_open_time": last_open_time.isoformat() if last_open_time is not None else "",
+        "last_close_time": last_close_time.isoformat() if last_close_time is not None else "",
     }
 
     return df, meta
+
+
+def fetch_server_time_ms(market: str = "futures", session: Optional[requests.Session] = None) -> Tuple[int, Dict[str, Any]]:
+    """Fetch Binance server time (milliseconds since epoch).
+
+    Used to detect local clock skew during live forward tests.
+    """
+    market = str(market).strip().lower()
+    if market == "futures":
+        url = "https://fapi.binance.com/fapi/v1/time"
+    elif market == "spot":
+        url = "https://api.binance.com/api/v3/time"
+    else:
+        raise ValueError("market must be 'futures' or 'spot'")
+
+    sess = session or requests.Session()
+    r = sess.get(url, timeout=10)
+    r.raise_for_status()
+    data = r.json() if isinstance(r.json(), dict) else {}
+    server_ms = int(data.get("serverTime", 0))
+    meta = {"endpoint": url, "fetched_at": _utcnow().isoformat(), "serverTime": server_ms}
+    return server_ms, meta

@@ -9,7 +9,12 @@ import pandas as pd
 from backtester.futures_engine import FuturesEngineConfig
 from backtester.risk import RiskLimits
 from forward.artifacts import append_csv_rows, append_jsonl, build_signals_df
-from forward.binance_live import BinanceLiveKlineSource, fetch_recent_klines_df, interval_to_seconds
+from forward.binance_live import (
+    BinanceLiveKlineSource,
+    fetch_recent_klines_df,
+    fetch_server_time_ms,
+    interval_to_seconds,
+)
 from forward.shadow import build_signals
 from forward.stream_engine import StreamingFuturesShadowEngine
 
@@ -108,6 +113,53 @@ async def run_live_shadow(
     )
     df_raw = rest_df.copy()
 
+    # --- Bootstrap validation (freshness + local clock sanity) ---
+    # If bootstrap_max_age_bars not set, default to the kill-switch max_data_gap_bars (even if risk is disabled).
+    default_age_bars = int(risk_limits.kill_switch.max_data_gap_bars) if risk_limits is not None else 2
+    bam = (live_cfg or {}).get("bootstrap_max_age_bars", default_age_bars)
+    if bam is None:
+        bam = default_age_bars
+    bootstrap_max_age_bars = int(bam)
+    bootstrap_max_age_bars = max(1, bootstrap_max_age_bars)
+    allowed_bootstrap_age_s = float(bar_seconds * bootstrap_max_age_bars)
+
+    # Parse last closed candle time from metadata if available.
+    last_close_iso = str((rest_meta or {}).get("last_close_time", "") or "")
+    last_close_ts: Optional[pd.Timestamp] = None
+    if last_close_iso:
+        try:
+            last_close_ts = pd.to_datetime(last_close_iso, utc=True)
+        except Exception:
+            last_close_ts = None
+    if last_close_ts is None and len(df_raw.index):
+        # Fallback: approximate close as open + interval.
+        last_close_ts = df_raw.index[-1] + pd.Timedelta(seconds=int(bar_seconds))
+
+    now_utc = datetime.now(timezone.utc)
+    bootstrap_age_s = None
+    if last_close_ts is not None:
+        bootstrap_age_s = float((now_utc - last_close_ts.to_pydatetime()).total_seconds())
+
+    # Local clock skew check vs Binance server time
+    clock_skew_ms = None
+    clock_meta: Dict[str, Any] = {}
+    try:
+        server_ms, clock_meta = fetch_server_time_ms(market=market)
+        local_ms = int(now_utc.timestamp() * 1000)
+        clock_skew_ms = int(local_ms - int(server_ms))
+    except Exception as e:
+        append_jsonl(
+            events_path,
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "CLOCK_SKEW_CHECK_FAILED",
+                    "error": str(e),
+                }
+            ],
+        )
+
+
     # Marker: we only start trading AFTER the latest bootstrapped candle.
     trading_start_ts: Optional[pd.Timestamp] = None
     if len(df_raw.index):
@@ -130,6 +182,133 @@ async def run_live_shadow(
         ],
     )
 
+    # Emit bootstrap freshness + clock skew signals before streaming.
+    # Clock skew thresholds
+    skew_warn_ms = 5_000
+    skew_fatal_ms = 30_000
+    if clock_skew_ms is not None:
+        if abs(clock_skew_ms) > skew_fatal_ms:
+            append_jsonl(
+                events_path,
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "CLOCK_SKEW_FATAL",
+                        "clock_skew_ms": int(clock_skew_ms),
+                        "warn_ms": int(skew_warn_ms),
+                        "fatal_ms": int(skew_fatal_ms),
+                        "server_time": clock_meta,
+                    }
+                ],
+            )
+            # Clean shutdown: don't start WS/heartbeat.
+            append_jsonl(
+                events_path,
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "LIVE_RUN_END",
+                        "bars_processed": 0,
+                        "final_equity": float(initial_capital),
+                        "reason": "CLOCK_SKEW_FATAL",
+                    }
+                ],
+            )
+            return 0
+
+        if abs(clock_skew_ms) > skew_warn_ms:
+            append_jsonl(
+                events_path,
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "CLOCK_SKEW_WARN",
+                        "clock_skew_ms": int(clock_skew_ms),
+                        "warn_ms": int(skew_warn_ms),
+                        "fatal_ms": int(skew_fatal_ms),
+                        "server_time": clock_meta,
+                    }
+                ],
+            )
+
+    if last_close_ts is None:
+        append_jsonl(
+            events_path,
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "BOOTSTRAP_EMPTY_OR_INVALID",
+                    "bootstrap_rows": int(len(df_raw.index)),
+                }
+            ],
+        )
+        append_jsonl(
+            events_path,
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "LIVE_RUN_END",
+                    "bars_processed": 0,
+                    "final_equity": float(initial_capital),
+                    "reason": "BOOTSTRAP_EMPTY_OR_INVALID",
+                }
+            ],
+        )
+        return 0
+
+    append_jsonl(
+        events_path,
+        [
+            {
+                "ts": _utcnow_iso(),
+                "type": "BOOTSTRAP_VALIDATION",
+                "last_close_time": last_close_ts.isoformat(),
+                "age_seconds": float(bootstrap_age_s) if bootstrap_age_s is not None else None,
+                "allowed_seconds": float(allowed_bootstrap_age_s),
+                "bootstrap_max_age_bars": int(bootstrap_max_age_bars),
+                "bar_seconds": int(bar_seconds),
+            }
+        ],
+    )
+
+    if bootstrap_age_s is not None and bootstrap_age_s > allowed_bootstrap_age_s:
+        append_jsonl(
+            events_path,
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "BOOTSTRAP_STALE",
+                    "age_seconds": float(bootstrap_age_s),
+                    "allowed_seconds": float(allowed_bootstrap_age_s),
+                    "bootstrap_max_age_bars": int(bootstrap_max_age_bars),
+                }
+            ],
+        )
+        append_jsonl(
+            events_path,
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "LIVE_RUN_END",
+                    "bars_processed": 0,
+                    "final_equity": float(initial_capital),
+                    "reason": "BOOTSTRAP_STALE",
+                }
+            ],
+        )
+        return 0
+    else:
+        append_jsonl(
+            events_path,
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "BOOTSTRAP_OK",
+                    "age_seconds": float(bootstrap_age_s) if bootstrap_age_s is not None else None,
+                }
+            ],
+        )
+
     engine_cfg = FuturesEngineConfig(
         initial_capital=float(initial_capital),
         position_size=float(position_size),
@@ -142,7 +321,12 @@ async def run_live_shadow(
     engine = StreamingFuturesShadowEngine(engine_cfg, risk_limits=risk_limits, expected_bar_seconds=bar_seconds)
 
     # Track last WS message time (heartbeat) + last CLOSED bar time (staleness)
-    last_closed_bar_at = datetime.now(timezone.utc)
+    # Seed "last_closed_bar_at" from the bootstrapped last closed candle, so stale detection
+    # reflects data freshness (not program start time).
+    try:
+        last_closed_bar_at = last_close_ts.to_pydatetime() if last_close_ts is not None else datetime.now(timezone.utc)
+    except Exception:
+        last_closed_bar_at = datetime.now(timezone.utc)
     last_bar_open_ts: Optional[pd.Timestamp] = trading_start_ts
 
     # Trade/order ids (stable + readable)
@@ -176,7 +360,9 @@ async def run_live_shadow(
 
             # Staleness kill-switch is based on CLOSED bars not arriving
             since_closed = (now - last_closed_bar_at).total_seconds()
-            allowed = float(bar_seconds * (risk_limits.kill_switch.max_data_gap_bars if (risk_limits and risk_limits.enabled) else 2))
+            # Data staleness is operational safety; apply kill-switch config even if risk limits are disabled.
+            gap_bars = int(risk_limits.kill_switch.max_data_gap_bars) if risk_limits is not None else 2
+            allowed = float(bar_seconds * gap_bars)
             if since_closed > allowed:
                 append_jsonl(
                     events_path,
@@ -190,7 +376,8 @@ async def run_live_shadow(
                     ],
                 )
                 stop_event.set()
-                break
+                stop_requested = True
+                continue
 
     src = BinanceLiveKlineSource(
         symbol=symbol,
@@ -205,11 +392,14 @@ async def run_live_shadow(
 
     bars_processed = 0
     start_wall = datetime.now(timezone.utc)
+    stop_requested = False
 
     try:
         async for bar in src.stream_closed(stop_event=stop_event):
+            # If a stop was requested, ignore any late-arriving buffered bars;
+            # the stream should terminate promptly once stop_event is set.
             if stop_event.is_set():
-                break
+                continue
 
             # Log (re)connects
             if src.connect_count != last_connect_count:
@@ -340,10 +530,13 @@ async def run_live_shadow(
             bars_processed += 1
 
             # Stop conditions
+            if stop_requested:
+                continue
             if max_bars is not None and bars_processed >= int(max_bars):
                 append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "STOP_MAX_BARS", "max_bars": int(max_bars)}])
                 stop_event.set()
-                break
+                stop_requested = True
+                continue
 
             if duration_minutes is not None:
                 elapsed = (datetime.now(timezone.utc) - start_wall).total_seconds() / 60.0
@@ -353,7 +546,8 @@ async def run_live_shadow(
                         [{"ts": _utcnow_iso(), "type": "STOP_DURATION", "duration_minutes": int(duration_minutes)}],
                     )
                     stop_event.set()
-                    break
+                    stop_requested = True
+                    continue
 
             # If risk manager triggered a global halt, stop.
             if engine.risk_mgr is not None and engine.risk_mgr.halted_global:
@@ -362,13 +556,16 @@ async def run_live_shadow(
                     [{"ts": _utcnow_iso(), "type": "STOP_RISK_HALT", "reason": engine.risk_mgr.halt_reason}],
                 )
                 stop_event.set()
-                break
+                stop_requested = True
+                continue
 
     finally:
         stop_event.set()
         hb.cancel()
         try:
             await hb
+        except asyncio.CancelledError:
+            pass
         except Exception:
             pass
 

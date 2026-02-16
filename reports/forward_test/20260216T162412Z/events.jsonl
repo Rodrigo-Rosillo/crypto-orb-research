@@ -1,0 +1,8 @@
+{"ts": "2026-02-16T16:24:13.212383+00:00", "type": "LIVE_RUN_START", "mode": "shadow", "source": "live", "symbol": "SOLUSDT", "timeframe": "30m", "market": "futures", "bootstrap": {"endpoint": "https://fapi.binance.com/fapi/v1/klines", "fetched_at": "2026-02-16T16:24:12.894481+00:00", "symbol": "SOLUSDT", "interval": "30m", "limit": 1000, "market": "futures", "rows": 999, "last_open_time": "2026-02-16T15:30:00+00:00", "last_close_time": "2026-02-16T15:59:59.999000+00:00"}, "trading_start_ts": "2026-02-16T15:30:00+00:00"}
+{"ts": "2026-02-16T16:24:13.213056+00:00", "type": "BOOTSTRAP_VALIDATION", "last_close_time": "2026-02-16T15:59:59.999000+00:00", "age_seconds": 1452.900326, "allowed_seconds": 1800.0, "bootstrap_max_age_bars": 1, "bar_seconds": 1800}
+{"ts": "2026-02-16T16:24:13.213574+00:00", "type": "BOOTSTRAP_OK", "age_seconds": 1452.900326}
+{"ts": "2026-02-16T16:30:00.581743+00:00", "type": "WS_CONNECTED", "connect_count": 1}
+{"ts": "2026-02-16T16:30:00.582486+00:00", "type": "BAR_CLOSED", "open_time": "2026-02-16T16:00:00+00:00", "close_time": "2026-02-16T16:29:59.999000+00:00", "close": 83.76}
+{"ts": "2026-02-16T16:00:00+00:00", "kind": "DAY_START", "message": "New UTC day", "day": "2026-02-16", "day_start_equity": 10000.0}
+{"ts": "2026-02-16T16:30:00.614182+00:00", "type": "STOP_MAX_BARS", "max_bars": 1}
+{"ts": "2026-02-16T16:30:02.119555+00:00", "type": "LIVE_RUN_END", "bars_processed": 1, "final_equity": 10000.0}

@@ -37,16 +37,16 @@ leverage:
 # Phase 4 risk controls (recommended ON for forward tests)
 risk_controls:
   enabled: true
-  max_position_margin_frac: 0.95
+  max_position_margin_frac: 0.15
   max_leverage: 2.0
-  max_daily_loss_pct: 0.03
-  max_drawdown_pct: 0.30
-  max_consecutive_losses: 4
-  max_exposure_bars: 336
+  max_daily_loss_pct: 0.02
+  max_drawdown_pct: 0.15
+  max_consecutive_losses: 3
+  max_exposure_bars: 48
   kill_switch:
-    max_data_gap_bars: 200
+    max_data_gap_bars: 1
     max_order_rejects_per_day: 2
-    max_margin_ratio: 99999.0
+    max_margin_ratio: 0.80
 
 # Phase 5 forward test settings
 forward_test:
@@ -57,7 +57,7 @@ forward_test:
 
   # Source:
   #   - replay: read candles from local parquet (deterministic)
-  #   - live: connect to live market data (implemented in Phase 5 later steps)
+  #   - live: connect to live market data (Phase 5 Step 3)
   source: replay
 
   # Replay window (optional). If omitted, uses full dataset.
@@ -72,6 +72,19 @@ forward_test:
 
   # How many recent bars to keep for indicator context
   bar_lookback: 1000
+
+  # Live market ingestion settings (Step 3)
+  live:
+    # futures is recommended for SOLUSDT perpetual market-data consistency
+    market: futures
+    # REST bootstrap window (closed candles only)
+    bootstrap_limit: 1000
+    # Websocket reconnect backoff cap
+    max_backoff_seconds: 60
+    # Heartbeat warning if no closed candles are received for this many seconds
+    heartbeat_seconds: 120
+    # How often to check for staleness (seconds)
+    stale_check_interval_seconds: 30
 
   # Shadow execution model defaults (kept aligned with backtest assumptions)
   execution_model:

@@ -44,7 +44,7 @@ risk_controls:
   max_consecutive_losses: 3
   max_exposure_bars: 48
   kill_switch:
-    max_data_gap_bars: 2
+    max_data_gap_bars: 1
     max_order_rejects_per_day: 2
     max_margin_ratio: 0.80
 

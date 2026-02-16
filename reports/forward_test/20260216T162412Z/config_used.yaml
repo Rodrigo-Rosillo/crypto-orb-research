@@ -44,7 +44,7 @@ risk_controls:
   max_consecutive_losses: 3
   max_exposure_bars: 48
   kill_switch:
-    max_data_gap_bars: 2
+    max_data_gap_bars: 1
     max_order_rejects_per_day: 2
     max_margin_ratio: 0.80
 
@@ -79,9 +79,6 @@ forward_test:
     market: futures
     # REST bootstrap window (closed candles only)
     bootstrap_limit: 1000
-    # Bootstrap freshness validation. If null/omitted, defaults to kill_switch.max_data_gap_bars.
-    # Example: with 30m bars and bootstrap_max_age_bars=1, bootstrap must be <= 30 minutes old.
-    bootstrap_max_age_bars: null
     # Websocket reconnect backoff cap
     max_backoff_seconds: 60
     # Heartbeat warning if no closed candles are received for this many seconds
