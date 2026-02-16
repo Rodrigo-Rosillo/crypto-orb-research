@@ -447,3 +447,32 @@ python scripts/compare_forward_vs_baseline.py --run-id 20260214T222953Z
 python scripts/compare_forward_vs_baseline.py --run-id 20260214T222953Z --strict
 ```
 
+### Step 3: Live ingestion (shadow trading on live market)
+
+This step connects to Binance **live** kline data and writes the same artifacts as replay mode.
+
+1) Edit `config_forward_test.yaml` and set:
+- `forward_test.source: live`
+- (optional) adjust `forward_test.live.*` settings
+
+2) Run:
+```bash
+python scripts/forward_test.py --config config_forward_test.yaml --mode shadow --source live
+```
+
+Useful stop controls:
+```bash
+# Stop after 10 closed candles
+python scripts/forward_test.py --config config_forward_test.yaml --mode shadow --source live --max-bars 10
+
+# Stop after 180 minutes
+python scripts/forward_test.py --config config_forward_test.yaml --mode shadow --source live --duration-minutes 180
+```
+
+Acceptance check (Phase 5 / Step 3):
+- candles arrive on schedule (every 30m)
+- no duplicate candle processing (check `events.jsonl` for `BAR_DUPLICATE_IGNORED`)
+- simulate a disconnect (disable internet or block the domain), then restore it:
+  - the runner should reconnect and resume without duplicating candles
+  - `events.jsonl` will show heartbeat warnings if data pauses
+

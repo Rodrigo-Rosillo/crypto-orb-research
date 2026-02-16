@@ -6,6 +6,7 @@ os.environ["PYTHONHASHSEED"] = "0"
 import argparse
 import hashlib
 import json
+import asyncio
 import platform
 import subprocess
 import sys
@@ -30,6 +31,7 @@ from forward.artifacts import (  # noqa: E402
 )
 from forward.replay import load_processed_parquet  # noqa: E402
 from forward.shadow import run_shadow_futures  # noqa: E402
+from forward.live_shadow import run_live_shadow  # noqa: E402
 from forward.utils import ensure_repo_path, maybe_get_forward_cfg, parse_hhmm, parse_utc_ts, utc_run_id  # noqa: E402
 
 
@@ -124,6 +126,20 @@ def main() -> int:
         type=str,
         default=None,
         help="Replay end timestamp/date (UTC). Example: 2025-06-30",
+    )
+
+    # Live mode controls
+    parser.add_argument(
+        "--max-bars",
+        type=int,
+        default=None,
+        help="(live) Stop after processing N closed bars.",
+    )
+    parser.add_argument(
+        "--duration-minutes",
+        type=int,
+        default=None,
+        help="(live) Stop after N minutes of wall-clock time.",
     )
     args = parser.parse_args()
 
@@ -312,9 +328,62 @@ def main() -> int:
             json.dumps(shadow_res.stats, indent=2, sort_keys=True, default=str),
             encoding="utf-8",
         )
+    elif source == "live" and mode == "shadow":
+        note = "Phase 5 Step 3: live source + shadow execution (non-deterministic)."
+
+        symbol = str(cfg.get("symbol", "SOLUSDT"))
+        timeframe = str(cfg.get("timeframe", "30m"))
+
+        orb_start = parse_hhmm(cfg["orb"]["start"])
+        orb_end = parse_hhmm(cfg["orb"]["end"])
+        orb_cutoff = parse_hhmm(cfg["orb"]["cutoff"])
+
+        adx_period = int(cfg["adx"]["period"])
+        adx_threshold = float(cfg["adx"]["threshold"])
+
+        initial_capital = float(cfg["risk"]["initial_capital"])
+        position_size = float(cfg["risk"]["position_size"])
+        taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
+
+        lev_cfg = cfg.get("leverage") or {}
+        leverage = float(lev_cfg.get("max_leverage", 1.0)) if bool(lev_cfg.get("enabled", True)) else 1.0
+
+        exec_cfg = (ft_cfg.get("execution_model") or {}) if isinstance(ft_cfg, dict) else {}
+        delay_bars = int(exec_cfg.get("delay_bars", 1))
+        slippage_bps = float(exec_cfg.get("slippage_bps", 0.0))
+
+        # Ensure skeleton exists. Live runner appends incrementally.
+        write_skeleton(run_dir)
+
+        # Run async live loop (writes artifacts into run_dir)
+        asyncio.run(
+            run_live_shadow(
+                run_dir=run_dir,
+                cfg=cfg,
+                ft_cfg=ft_cfg,
+                risk_limits=risk_limits,
+                symbol=symbol,
+                timeframe=timeframe,
+                orb_start=orb_start,
+                orb_end=orb_end,
+                orb_cutoff=orb_cutoff,
+                adx_period=adx_period,
+                adx_threshold=adx_threshold,
+                initial_capital=initial_capital,
+                position_size=position_size,
+                taker_fee_rate=taker_fee_rate,
+                leverage=leverage,
+                delay_bars=delay_bars,
+                slippage_bps=slippage_bps,
+                funding_rate_per_8h=float(cfg.get("funding", {}).get("rate_per_8h", 0.0)) if isinstance(cfg.get("funding"), dict) else 0.0,
+                max_bars=args.max_bars,
+                duration_minutes=args.duration_minutes,
+            )
+        )
+
     else:
         # Other combinations are wired in later Phase 5 steps.
-        note = f"Not implemented yet: mode={mode}, source={source}. Implemented in Step 2: replay+shadow."
+        note = f"Not implemented yet: mode={mode}, source={source}. Implemented: replay+shadow (Step 2), live+shadow (Step 3)."
         write_skeleton(run_dir)
 
     meta = {
@@ -359,8 +428,10 @@ def main() -> int:
 
     if source == "replay" and mode == "shadow":
         print("[forward_test] ✅ replay+shadow run completed.")
+    elif source == "live" and mode == "shadow":
+        print("[forward_test] ✅ live+shadow run completed.")
     else:
-        print("[forward_test] ℹ️ Only replay+shadow is implemented in Step 2.")
+        print("[forward_test] ℹ️ Not implemented for this mode/source yet.")
     return 0
 
 

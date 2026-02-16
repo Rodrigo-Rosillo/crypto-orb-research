@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import csv
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,6 +25,16 @@ def write_jsonl(path: Path, events: List[Dict[str, Any]]) -> None:
             f.write(json.dumps(e, ensure_ascii=False, default=str) + "\n")
 
 
+def append_jsonl(path: Path, events: List[Dict[str, Any]]) -> None:
+    """Append JSON lines to an events file (creates it if missing)."""
+    if not events:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        for e in events:
+            f.write(json.dumps(e, ensure_ascii=False, default=str) + "\n")
+
+
 def write_csv(df: pd.DataFrame, path: Path, columns: List[str]) -> None:
     out = df.copy()
     for c in columns:
@@ -31,6 +42,21 @@ def write_csv(df: pd.DataFrame, path: Path, columns: List[str]) -> None:
             out[c] = ""
     out = out[columns]
     out.to_csv(path, index=False)
+
+
+def append_csv_rows(path: Path, rows: List[Dict[str, Any]], columns: List[str]) -> None:
+    """Append rows to a CSV file, writing header if the file is new/empty."""
+    if not rows:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    file_exists = path.exists() and path.stat().st_size > 0
+    with path.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=columns)
+        if not file_exists:
+            writer.writeheader()
+        for r in rows:
+            out = {c: r.get(c, "") for c in columns}
+            writer.writerow(out)
 
 
 def build_signals_df(df_sig: pd.DataFrame, symbol: str) -> pd.DataFrame:

@@ -4,7 +4,7 @@ fonttools==4.60.2
 importlib_resources==6.5.2
 kiwisolver==1.4.7
 matplotlib==3.9.4
-numpy>=2.1.0
+numpy>=2.0.2
 packaging==26.0
 pandas==2.3.3
 pillow==11.3.0
@@ -12,6 +12,8 @@ pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 pytz==2025.2
 PyYAML==6.0.3
+requests==2.32.3
+websockets==13.1
 six==1.17.0
 tzdata==2025.3
 zipp==3.23.0
