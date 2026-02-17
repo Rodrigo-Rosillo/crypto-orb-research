@@ -23,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.utils import sha256_file  # noqa: E402
 from backtester.risk import risk_limits_from_config  # noqa: E402
 from forward.artifacts import (  # noqa: E402
     build_orders_fills_positions,
@@ -39,14 +40,6 @@ from forward.utils import ensure_repo_path, maybe_get_forward_cfg, parse_hhmm, p
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def get_git_head() -> str:

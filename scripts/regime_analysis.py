@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from datetime import datetime, time, timezone
@@ -16,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.utils import parse_hhmm, sha256_file  # noqa: E402
 from strategy import add_trend_indicators  # noqa: E402
 
 
@@ -24,19 +24,6 @@ from strategy import add_trend_indicators  # noqa: E402
 # ---------------------------
 def stable_json(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-
-
-def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def parse_hhmm(s: str) -> time:
-    hh, mm = s.strip().split(":")
-    return time(int(hh), int(mm))
 
 
 def ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:

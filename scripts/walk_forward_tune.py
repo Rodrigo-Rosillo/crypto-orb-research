@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.utils import load_valid_days_csv, parse_hhmm, sha256_file  # noqa: E402
 from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
 from backtester.risk import risk_limits_from_config  # noqa: E402
@@ -38,14 +39,6 @@ def stable_json(obj: Any) -> str:
 
 def sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
-
-
-def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def get_git_info() -> Dict[str, Any]:
@@ -62,11 +55,6 @@ def get_git_info() -> Dict[str, Any]:
         info["branch"] = None
         info["dirty"] = None
     return info
-
-
-def parse_hhmm(s: str) -> time:
-    hh, mm = s.strip().split(":")
-    return time(int(hh), int(mm))
 
 
 def fmt_hhmm(t: time) -> str:
@@ -86,15 +74,6 @@ def slice_by_date_inclusive(df: pd.DataFrame, start_date: str, end_date: str) ->
     start_ts = pd.Timestamp(start_date, tz="UTC")
     end_excl = pd.Timestamp(end_date, tz="UTC") + pd.Timedelta(days=1)
     return df[(df.index >= start_ts) & (df.index < end_excl)].copy()
-
-
-def load_valid_days_csv(path: Path) -> set:
-    if not path.exists():
-        raise FileNotFoundError(f"Valid days file not found: {path}. Run: python scripts/build_parquet.py")
-    vdf = pd.read_csv(path)
-    if "date_utc" not in vdf.columns:
-        raise ValueError(f"{path} must contain a 'date_utc' column")
-    return set(pd.to_datetime(vdf["date_utc"], utc=True).dt.date)
 
 
 def compute_max_drawdown_pct(equity: pd.Series) -> float:

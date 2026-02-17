@@ -1,8 +1,8 @@
 {
-  "generated_utc": "2026-02-15T01:02:38.724690+00:00",
+  "generated_utc": "2026-02-17T20:09:29.617551+00:00",
   "git": {
     "branch": "main",
-    "commit": "c907bee8d32255f585050caf35a5bb75a5d55168",
+    "commit": "21dc8f201466fdfa85745019445ec3fdbd65e128",
     "dirty": true
   },
   "inputs": {
@@ -14,7 +14,7 @@
     "raw_manifest_path": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\manifest.json",
     "raw_manifest_sha256": "9ff4bd7a251ddc56bd95a24df3c332e86eefa4fc444d5829fe8745fb4334e887",
     "script_path": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\scripts\\run_baseline.py",
-    "script_sha256": "a6170e8b678df3f09a4ecffd70a5e6f24f337d1040cbd021120f5dce79de9ac0",
+    "script_sha256": "26be0e1fae7a16b84f0fd6a9d0c53e2b1407cc0ba95a34819b395e0e787dc0f7",
     "used_files": [
       "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\processed\\SOLUSDT_30m.parquet"
     ],
@@ -24,10 +24,10 @@
   "output_sha256": {
     "equity_curve.csv": "229b8539f53496edd9266bdf0e30201d2d908d5a8aa5558cdedcb787b3010fcf",
     "equity_curve.png": "43b64d7c9b4cff7df36250d3303d730577407aacdddbebe96821d969069f8dd0",
-    "hashes.json": "b8cd18a401d77ac711f752ce28ea9e6169bdba00dfa454a8751155d3e2b6e700",
+    "hashes.json": "2a55c13f8cd3e555ba579c7bb8611e4d158c1d502bfc6192ff45a12c00a0f2a0",
     "orb_ranges.csv": "cd94e2fc7162fa7ae9b6d31bd9a0a4538f895351762d5a5b6bb2356e2379d47b",
     "results.json": "36b53c859c767501d184b37282a655c9c3bcd8e68c5fbd44f6239df9d4b4db09",
-    "run_metadata.json": "a69d55c24cf3e75d28f60d5ee9c3ad898ee2289586cc95ab5c0489c81035cf31",
+    "run_metadata.json": "83954ff718423495299cd234e011a37e617f8d2292a83b0cc6bf84b248df738c",
     "trades.csv": "a36cb867d43c6b9266d86c7f1c1a75a98dcfbd7ab0b0ae18326867750a6925b9"
   },
   "outputs": {

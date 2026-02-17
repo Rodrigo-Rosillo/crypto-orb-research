@@ -3,7 +3,6 @@ import os
 os.environ["PYTHONHASHSEED"] = "0"
 
 import argparse
-import hashlib
 import json
 import platform
 import random
@@ -25,6 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.utils import parse_hhmm, sha256_file  # noqa: E402
 from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
 from backtester.risk import risk_limits_from_config  # noqa: E402
@@ -32,14 +32,6 @@ from backtester.risk import risk_limits_from_config  # noqa: E402
 
 def stable_json(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False, indent=2)
-
-
-def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def get_git_info() -> Dict[str, Any]:
@@ -62,11 +54,6 @@ def ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:
     if df.index.tz is None:
         df = df.tz_localize("UTC")
     return df.sort_index()
-
-
-def parse_hhmm(s: str):
-    hh, mm = s.strip().split(":")
-    return datetime(2000, 1, 1, int(hh), int(mm)).time()
 
 
 def compute_daily_realized_vol(df_prices: pd.DataFrame) -> pd.Series:

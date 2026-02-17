@@ -20,18 +20,14 @@ random.seed(0)
 np.random.seed(0)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.utils import sha256_file  # noqa: E402
 
 
 def stable_json(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False, indent=2)
-
-
-def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def sha256_bytes(b: bytes) -> str:
@@ -203,7 +199,7 @@ def main() -> int:
     ap.add_argument("--n", type=int, default=2000, help="# bootstrap samples")
     ap.add_argument("--block-days", type=int, default=14, help="block length in days")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--alpha", type=float, default=0.05, help="CI alpha (0.05 => 95% CI)")
+    ap.add_argument("--alpha", type=float, default=0.05, help="CI alpha (0.05 => 95%% CI)")
 
     args = ap.parse_args()
 

@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional
 
 import pandas as pd
-
-
-def parse_hhmm(s: str) -> time:
-    hh, mm = s.strip().split(":")
-    return datetime(2000, 1, 1, int(hh), int(mm)).time()
+from core.utils import load_valid_days_csv, parse_hhmm
 
 
 def parse_utc_ts(s: Optional[str]) -> Optional[pd.Timestamp]:
@@ -22,18 +18,6 @@ def parse_utc_ts(s: Optional[str]) -> Optional[pd.Timestamp]:
     else:
         ts = ts.tz_convert("UTC")
     return ts
-
-
-def load_valid_days_csv(path: Path) -> Set:
-    """Return set of datetime.date objects (UTC days) marked valid."""
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Valid days file not found: {path}. Run: python scripts/build_parquet.py"
-        )
-    vdf = pd.read_csv(path)
-    if "date_utc" not in vdf.columns:
-        raise ValueError(f"{path} must contain a 'date_utc' column")
-    return set(pd.to_datetime(vdf["date_utc"], utc=True).dt.date)
 
 
 def ensure_repo_path(repo_root: Path, p: str) -> Path:

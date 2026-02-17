@@ -335,7 +335,7 @@ Outcome:
 Use when: you want to understand which day “regimes” drive results (volatility buckets, ADX buckets, day-of-week, etc).
 
 ```bash
-python scripts/regime_analysis.py --in-dir reports/baseline --out-dir reports/regime
+python scripts/regime_analysis.py --funding-per-8h 0
 ```
 
 Outcome:

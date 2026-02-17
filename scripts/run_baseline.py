@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.utils import load_valid_days_csv, parse_hhmm, sha256_file  # noqa: E402
 from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
 
 # Futures engine (Phase 2)
@@ -40,34 +41,6 @@ def stable_json(obj: Any) -> str:
 
 def sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
-
-
-def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def parse_hhmm(s: str):
-    hh, mm = s.strip().split(":")
-    return datetime(2000, 1, 1, int(hh), int(mm)).time()
-
-
-def load_valid_days_csv(path: Path) -> set:
-    """
-    Returns a set of datetime.date objects (UTC days) that are valid.
-    valid_days.csv must include a 'date_utc' column like '2025-01-01'.
-    """
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Valid days file not found: {path}. Run: python scripts/build_parquet.py"
-        )
-    vdf = pd.read_csv(path)
-    if "date_utc" not in vdf.columns:
-        raise ValueError(f"{path} must contain a 'date_utc' column")
-    return set(pd.to_datetime(vdf["date_utc"], utc=True).dt.date)
 
 
 def read_binance_ohlcv(file_path: Path) -> pd.DataFrame:
