@@ -45,8 +45,9 @@ def _pos_side_from_amt(amt: float) -> str:
 
 
 def _extract_order_id(resp: Any) -> Optional[int]:
+    # Regular order responses use orderId; Algo (conditional) responses use algoId.
     if isinstance(resp, dict):
-        oid = resp.get("orderId") or resp.get("orderID")
+        oid = resp.get("orderId") or resp.get("orderID") or resp.get("algoId") or resp.get("algoID")
         if oid is not None:
             try:
                 return int(oid)
@@ -57,7 +58,8 @@ def _extract_order_id(resp: Any) -> Optional[int]:
 
 def _order_status(resp: Any) -> str:
     if isinstance(resp, dict):
-        return str(resp.get("status") or "")
+        # Regular orders: status; Algo orders: algoStatus
+        return str(resp.get("status") or resp.get("algoStatus") or "")
     return ""
 
 
@@ -102,6 +104,7 @@ async def run_live_testnet(
     max_bars: Optional[int] = None,
     duration_minutes: Optional[int] = None,
     smoke_test: bool = False,
+    external_stop_event: Optional[asyncio.Event] = None,
 ) -> int:
     """Phase 5 Step 4: live market data + TESTNET order placement.
 
@@ -122,7 +125,7 @@ async def run_live_testnet(
     stale_check_interval_seconds = int((live_cfg or {}).get("stale_check_interval_seconds", 30))
 
     testnet_cfg = ft_cfg.get("testnet") if isinstance(ft_cfg.get("testnet"), dict) else {}
-    base_url = str((testnet_cfg or {}).get("base_url", "https://testnet.binancefuture.com"))
+    base_url = str((testnet_cfg or {}).get("base_url", "https://demo-fapi.binance.com"))
     recv_window_ms = int((testnet_cfg or {}).get("recv_window_ms", 5000))
     poll_interval_seconds = float((testnet_cfg or {}).get("poll_interval_seconds", 2.0))
     cancel_open_orders_on_exit = bool((testnet_cfg or {}).get("cancel_open_orders_on_exit", True))
@@ -177,7 +180,9 @@ async def run_live_testnet(
         "leverage",
     ]
 
-    stop_event = asyncio.Event()
+    # Allow the CLI runner to inject an external stop_event (e.g., for graceful
+    # Ctrl+C handling). If not provided, create an internal event.
+    stop_event = external_stop_event or asyncio.Event()
 
     # Bootstrap history
     rest_df, rest_meta = fetch_recent_klines_df(
@@ -317,6 +322,7 @@ async def run_live_testnet(
     # Create broker
     try:
         broker = BinanceFuturesTestnetBroker(cfg=TestnetConfig(base_url=base_url, recv_window_ms=recv_window_ms, rate_limit=rl))
+        append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "TESTNET_BROKER_CONFIG", "base_url": base_url, "recv_window_ms": int(recv_window_ms)}])
     except TestnetAuthError as e:
         append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "TESTNET_AUTH_ERROR", "error": str(e)}])
         append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": float(initial_capital), "reason": "TESTNET_AUTH_ERROR"}])
@@ -330,7 +336,34 @@ async def run_live_testnet(
         append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "TESTNET_SET_LEVERAGE_FAILED", "error": str(e)}])
 
     # Load and reconcile state
+    had_state_file = bool(state_path.exists())
     state = load_state(state_path)
+    append_jsonl(
+        events_path,
+        [
+            {
+                "ts": _utcnow_iso(),
+                "type": "STATE_LOADED",
+                "path": "state.json",
+                "found": bool(had_state_file),
+                "bars_processed": int(state.bars_processed or 0),
+                "last_bar_open_time_utc": str(state.last_bar_open_time_utc or ""),
+            }
+        ],
+    )
+
+    # Persist an initial state snapshot immediately so state.json exists even if the
+    # run stops before the first closed candle arrives (common for short duration runs).
+    if state.last_bar_open_time_utc is None and trading_start_ts is not None:
+        try:
+            state.last_bar_open_time_utc = trading_start_ts.tz_convert("UTC").isoformat()
+        except Exception:
+            state.last_bar_open_time_utc = str(trading_start_ts)
+    try:
+        save_state(state_path, state)
+        append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "STATE_SAVED", "path": "state.json"}])
+    except Exception as e:
+        append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "STATE_SAVE_FAILED", "error": str(e)}])
 
     # Risk kill-switch thresholds (apply even if limits.enabled is False; these are operational safety checks)
     max_order_rejects_per_day = int(risk_limits.kill_switch.max_order_rejects_per_day) if risk_limits is not None else 3
@@ -344,7 +377,13 @@ async def run_live_testnet(
         side = _pos_side_from_amt(amt)
         return side, float(abs(amt)), float(entry), float(upl)
 
-    ex_side, ex_qty, ex_entry, ex_upl = fetch_exchange_position()
+
+    try:
+        ex_side, ex_qty, ex_entry, ex_upl = fetch_exchange_position()
+    except TestnetAPIError as e:
+        append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "TESTNET_POSITION_RISK_FAILED", "error": str(e), "payload": getattr(e, "payload", None)}])
+        append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": float(initial_capital), "reason": "TESTNET_POSITION_RISK_FAILED"}])
+        return 0
 
     if state.open_position is None and ex_side != "FLAT":
         append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "RECON_MISMATCH", "state": "FLAT", "exchange": ex_side, "qty": ex_qty, "entry_price": ex_entry}])
@@ -395,10 +434,33 @@ async def run_live_testnet(
             )
 
             if smoke_auto_flatten and ex_side2 != "FLAT":
-                broker.place_market_order(symbol=symbol, side="BUY", quantity=float(ex_qty2), reduce_only=True)
-                append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "TESTNET_SMOKE_FLATTEN"}])
+                flat_resp = broker.place_market_order(symbol=symbol, side="BUY", quantity=float(ex_qty2), reduce_only=True)
+                flat_oid = _extract_order_id(flat_resp)
+                flat_price = _order_avg_price(flat_resp)
+                append_jsonl(
+                    events_path,
+                    [{"ts": _utcnow_iso(), "type": "TESTNET_SMOKE_FLATTEN", "order_id": flat_oid, "fill_price": float(flat_price), "qty": float(ex_qty2)}],
+                )
+                # Mirror the entry record: write flatten order + fill for complete audit trail.
+                append_csv_rows(
+                    orders_path,
+                    [{"timestamp_utc": _utcnow_iso(), "due_timestamp_utc": "", "order_id": str(flat_oid or ""), "symbol": symbol, "side": "LONG", "qty": float(ex_qty2), "order_type": "MARKET", "limit_price": "", "status": "sent", "status_detail": "smoke_flatten", "reason": ""}],
+                    orders_cols,
+                )
+                append_csv_rows(
+                    fills_path,
+                    [{"timestamp_utc": _utcnow_iso(), "order_id": str(flat_oid or ""), "symbol": symbol, "side": "LONG", "qty": float(ex_qty2), "fill_price": float(flat_price), "fee": 0.0, "slippage_bps": float(slippage_bps), "exec_model": "testnet_market_reduce_only"}],
+                    fills_cols,
+                )
         except Exception as e:
             append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "TESTNET_SMOKE_FAILED", "error": str(e)}])
+
+        # Ensure state.json exists for smoke runs too.
+        try:
+            state.open_position = None
+            save_state(state_path, state)
+        except Exception:
+            pass
 
         append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": float(initial_capital), "reason": "SMOKE_TEST"}])
         return 0
@@ -491,13 +553,13 @@ async def run_live_testnet(
             if oid is None:
                 continue
             try:
-                o = broker.get_order(symbol=symbol, order_id=int(oid))
+                o = broker.get_algo_order(symbol=symbol, algo_id=int(oid))
                 st = _order_status(o)
-                if st in ("FILLED", "CANCELED", "REJECTED", "EXPIRED"):
+                # Algo orders: NEW/TRIGGERING/TRIGGERED/FINISHED/CANCELED/REJECTED/EXPIRED
+                if st in ("FINISHED", "CANCELED", "REJECTED", "EXPIRED"):
                     append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "ORDER_UPDATE", "order_id": int(oid), "kind": kind, "status": st}])
-                    # If one leg fills, assume position is closed.
-                    if st == "FILLED":
-                        # Reconcile position
+                    # If a leg finishes, reconcile exchange position to confirm closure.
+                    if st == "FINISHED":
                         ex_side4, ex_qty4, _, _ = fetch_exchange_position()
                         if ex_side4 == "FLAT" or ex_qty4 < 1e-9:
                             append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "POSITION_CLOSED", "via": kind}])

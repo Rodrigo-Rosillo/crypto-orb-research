@@ -45,6 +45,7 @@ async def run_live_shadow(
     funding_rate_per_8h: float = 0.0,
     max_bars: Optional[int] = None,
     duration_minutes: Optional[int] = None,
+    external_stop_event: Optional[asyncio.Event] = None,
 ) -> int:
     """Phase 5 Step 3: live market data ingestion + shadow execution.
 
@@ -102,7 +103,9 @@ async def run_live_shadow(
         "leverage",
     ]
 
-    stop_event = asyncio.Event()
+    # Allow the CLI runner to inject an external stop_event (e.g., for graceful
+    # Ctrl+C handling). If not provided, create an internal event.
+    stop_event = external_stop_event or asyncio.Event()
 
     # Bootstrap history
     rest_df, rest_meta = fetch_recent_klines_df(

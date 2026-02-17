@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import asyncio
+import signal
 import platform
 import subprocess
 import sys
@@ -80,6 +81,65 @@ def write_skeleton(run_dir: Path) -> None:
         encoding="utf-8",
     )
     (run_dir / "events.jsonl").touch(exist_ok=True)
+
+
+def _append_event_jsonl(path: Path, event: dict) -> None:
+    """Append a single JSON event line (best-effort)."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(event, sort_keys=True) + "\n")
+    except Exception:
+        # Never crash the runner because logging failed.
+        pass
+
+
+async def _run_with_graceful_sigint(coro: asyncio.Future, stop_event: asyncio.Event):
+    """Run an async coroutine with a SIGINT handler that triggers stop_event.
+
+    This prevents Ctrl+C from hard-cancelling the event loop (which can leave
+    websocket close tasks pending on Windows) and instead requests a clean stop.
+
+    Second Ctrl+C falls back to the prior handler (hard interrupt).
+    """
+
+    loop = asyncio.get_running_loop()
+    old_handler = signal.getsignal(signal.SIGINT)
+    sigint_count = {"n": 0}
+
+    def handler(sig, frame):  # noqa: ARG001
+        sigint_count["n"] += 1
+        if sigint_count["n"] == 1:
+            try:
+                loop.call_soon_threadsafe(stop_event.set)
+            except Exception:
+                try:
+                    stop_event.set()
+                except Exception:
+                    pass
+        else:
+            # Escalate on repeated interrupts.
+            try:
+                if callable(old_handler):
+                    old_handler(sig, frame)
+                else:
+                    raise KeyboardInterrupt
+            except KeyboardInterrupt:
+                raise
+
+    try:
+        signal.signal(signal.SIGINT, handler)
+    except Exception:
+        # If we can't install a handler, just run normally.
+        return await coro
+
+    try:
+        return await coro
+    finally:
+        try:
+            signal.signal(signal.SIGINT, old_handler)
+        except Exception:
+            pass
 
 
 def main() -> int:
@@ -173,6 +233,8 @@ def main() -> int:
     run_id = args.run_id or utc_run_id()
     run_dir = out_root / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    started_utc = datetime.now(timezone.utc).isoformat()
 
     # Persist config used (for audit/repro)
     (run_dir / "config_used.yaml").write_text(cfg_text, encoding="utf-8")
@@ -363,31 +425,39 @@ def main() -> int:
         # Ensure skeleton exists. Live runner appends incrementally.
         write_skeleton(run_dir)
 
-        # Run async live loop (writes artifacts into run_dir)
-        asyncio.run(
-            run_live_shadow(
-                run_dir=run_dir,
-                cfg=cfg,
-                ft_cfg=ft_cfg,
-                risk_limits=risk_limits,
-                symbol=symbol,
-                timeframe=timeframe,
-                orb_start=orb_start,
-                orb_end=orb_end,
-                orb_cutoff=orb_cutoff,
-                adx_period=adx_period,
-                adx_threshold=adx_threshold,
-                initial_capital=initial_capital,
-                position_size=position_size,
-                taker_fee_rate=taker_fee_rate,
-                leverage=leverage,
-                delay_bars=delay_bars,
-                slippage_bps=slippage_bps,
-                funding_rate_per_8h=float(cfg.get("funding", {}).get("rate_per_8h", 0.0)) if isinstance(cfg.get("funding"), dict) else 0.0,
-                max_bars=args.max_bars,
-                duration_minutes=args.duration_minutes,
+        # Run async live loop (writes artifacts into run_dir).
+        # Install a SIGINT handler so Ctrl+C requests a clean stop instead of
+        # abruptly cancelling the event loop (helps avoid websocket shutdown warnings).
+        async def _runner():
+            stop_event = asyncio.Event()
+            return await _run_with_graceful_sigint(
+                run_live_shadow(
+                    run_dir=run_dir,
+                    cfg=cfg,
+                    ft_cfg=ft_cfg,
+                    risk_limits=risk_limits,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    orb_start=orb_start,
+                    orb_end=orb_end,
+                    orb_cutoff=orb_cutoff,
+                    adx_period=adx_period,
+                    adx_threshold=adx_threshold,
+                    initial_capital=initial_capital,
+                    position_size=position_size,
+                    taker_fee_rate=taker_fee_rate,
+                    leverage=leverage,
+                    delay_bars=delay_bars,
+                    slippage_bps=slippage_bps,
+                    funding_rate_per_8h=float(cfg.get("funding", {}).get("rate_per_8h", 0.0)) if isinstance(cfg.get("funding"), dict) else 0.0,
+                    max_bars=args.max_bars,
+                    duration_minutes=args.duration_minutes,
+                    external_stop_event=stop_event,
+                ),
+                stop_event,
             )
-        )
+
+        asyncio.run(_runner())
 
     elif source == "live" and mode == "testnet":
         note = "Phase 5 Step 4: live source + Binance futures TESTNET order placement."
@@ -415,30 +485,52 @@ def main() -> int:
 
         write_skeleton(run_dir)
 
-        asyncio.run(
-            run_live_testnet(
-                run_dir=run_dir,
-                cfg=cfg,
-                ft_cfg=ft_cfg,
-                risk_limits=risk_limits,
-                symbol=symbol,
-                timeframe=timeframe,
-                orb_start=orb_start,
-                orb_end=orb_end,
-                orb_cutoff=orb_cutoff,
-                adx_period=adx_period,
-                adx_threshold=adx_threshold,
-                initial_capital=initial_capital,
-                position_size=position_size,
-                taker_fee_rate=taker_fee_rate,
-                leverage=leverage,
-                delay_bars=delay_bars,
-                slippage_bps=slippage_bps,
-                max_bars=args.max_bars,
-                duration_minutes=args.duration_minutes,
-                smoke_test=bool(args.smoke_test),
+        exit_code = 0
+
+        async def _runner():
+            stop_event = asyncio.Event()
+            return await _run_with_graceful_sigint(
+                run_live_testnet(
+                    run_dir=run_dir,
+                    cfg=cfg,
+                    ft_cfg=ft_cfg,
+                    risk_limits=risk_limits,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    orb_start=orb_start,
+                    orb_end=orb_end,
+                    orb_cutoff=orb_cutoff,
+                    adx_period=adx_period,
+                    adx_threshold=adx_threshold,
+                    initial_capital=initial_capital,
+                    position_size=position_size,
+                    taker_fee_rate=taker_fee_rate,
+                    leverage=leverage,
+                    delay_bars=delay_bars,
+                    slippage_bps=slippage_bps,
+                    max_bars=args.max_bars,
+                    duration_minutes=args.duration_minutes,
+                    smoke_test=bool(args.smoke_test),
+                    external_stop_event=stop_event,
+                ),
+                stop_event,
             )
-        )
+
+        try:
+            asyncio.run(_runner())
+        except KeyboardInterrupt:
+            # Second Ctrl+C escalates to a hard interrupt.
+            _append_event_jsonl(
+                run_dir / "events.jsonl",
+                {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "type": "LIVE_RUN_END",
+                    "bars_processed": None,
+                    "final_equity": None,
+                    "reason": "KEYBOARD_INTERRUPT",
+                },
+            )
+            exit_code = 130
 
     else:
         # Other combinations are wired in later Phase 5 steps.
@@ -447,7 +539,7 @@ def main() -> int:
 
     meta = {
         "run_id": run_id,
-        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "started_utc": started_utc,
         "mode": mode,
         "source": source,
         "out_dir": str(run_dir),
@@ -493,7 +585,10 @@ def main() -> int:
         print("[forward_test] ✅ live+testnet run completed.")
     else:
         print("[forward_test] ℹ️ Not implemented for this mode/source yet.")
-    return 0
+    try:
+        return int(locals().get("exit_code", 0))
+    except Exception:
+        return 0
 
 
 if __name__ == "__main__":

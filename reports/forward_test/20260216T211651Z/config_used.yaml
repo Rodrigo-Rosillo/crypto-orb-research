@@ -44,7 +44,7 @@ risk_controls:
   max_consecutive_losses: 3
   max_exposure_bars: 48
   kill_switch:
-    max_data_gap_bars: 1
+    max_data_gap_bars: 2
     max_order_rejects_per_day: 2
     max_margin_ratio: 0.80
 
@@ -79,12 +79,39 @@ forward_test:
     market: futures
     # REST bootstrap window (closed candles only)
     bootstrap_limit: 1000
+    # Bootstrap freshness validation. If null/omitted, defaults to kill_switch.max_data_gap_bars.
+    # Example: with 30m bars and bootstrap_max_age_bars=1, bootstrap must be <= 30 minutes old.
+    bootstrap_max_age_bars: null
     # Websocket reconnect backoff cap
     max_backoff_seconds: 60
     # Heartbeat warning if no closed candles are received for this many seconds
     heartbeat_seconds: 120
     # How often to check for staleness (seconds)
     stale_check_interval_seconds: 30
+
+  # Binance Futures TESTNET settings (Step 4)
+  # IMPORTANT: API keys must be provided via env vars, never config files:
+  #   - BINANCE_TESTNET_API_KEY
+  #   - BINANCE_TESTNET_API_SECRET
+  testnet:
+    # USD-M futures testnet base URL
+    base_url: "https://demo-fapi.binance.com"
+    recv_window_ms: 5000
+    # How often to poll order/position status during live runs (seconds)
+    poll_interval_seconds: 2
+    # Cancel open reduce-only TP/SL orders when the script exits
+    cancel_open_orders_on_exit: true
+    # If state/exchange mismatch is detected at startup, optionally flatten and exit (safer = false)
+    flatten_on_mismatch: false
+
+    # Smoke test (places tiny order then flattens)
+    smoke_qty: 0.10
+    smoke_auto_flatten: true
+
+    # Rate limit / retry tuning
+    max_retries: 6
+    base_backoff_seconds: 0.5
+    max_backoff_seconds: 20
 
   # Shadow execution model defaults (kept aligned with backtest assumptions)
   execution_model:

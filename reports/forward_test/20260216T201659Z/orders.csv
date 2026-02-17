@@ -1,0 +1,3 @@
+timestamp_utc,due_timestamp_utc,order_id,symbol,side,qty,order_type,limit_price,status,status_detail,reason
+2026-02-16T20:17:01.756554+00:00,,1695840989,SOLUSDT,SHORT,0.1,MARKET,,sent,smoke_entry,
+2026-02-16T20:17:02.048730+00:00,,1695841019,SOLUSDT,LONG,0.1,MARKET,,sent,smoke_flatten,

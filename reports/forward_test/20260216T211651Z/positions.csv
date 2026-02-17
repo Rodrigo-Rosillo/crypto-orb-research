@@ -1,2 +1,1 @@
 timestamp_utc,symbol,side,qty,entry_price,mark_price,unrealized_pnl,equity,margin_used,leverage
-2026-02-16T16:00:00+00:00,SOLUSDT,FLAT,0.0,,83.76,0.0,10000.0,0.0,1.0

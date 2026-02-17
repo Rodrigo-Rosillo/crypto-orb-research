@@ -1,0 +1,9 @@
+{"ts": "2026-02-16T20:17:00.232881+00:00", "type": "LIVE_RUN_START", "mode": "testnet", "source": "live", "symbol": "SOLUSDT", "timeframe": "30m", "market": "futures", "bootstrap": {"endpoint": "https://fapi.binance.com/fapi/v1/klines", "fetched_at": "2026-02-16T20:16:59.924775+00:00", "symbol": "SOLUSDT", "interval": "30m", "limit": 1000, "market": "futures", "rows": 999, "last_open_time": "2026-02-16T19:30:00+00:00", "last_close_time": "2026-02-16T19:59:59.999000+00:00"}, "trading_start_ts": "2026-02-16T19:30:00+00:00"}
+{"ts": "2026-02-16T20:17:00.233536+00:00", "type": "BOOTSTRAP_VALIDATION", "last_close_time": "2026-02-16T19:59:59.999000+00:00", "age_seconds": 1019.927999, "allowed_seconds": 3600.0, "bootstrap_max_age_bars": 2, "bar_seconds": 1800}
+{"ts": "2026-02-16T20:17:00.235677+00:00", "type": "BOOTSTRAP_OK", "age_seconds": 1019.927999}
+{"ts": "2026-02-16T20:17:00.236250+00:00", "type": "TESTNET_BROKER_CONFIG", "base_url": "https://demo-fapi.binance.com", "recv_window_ms": 5000}
+{"ts": "2026-02-16T20:17:01.017932+00:00", "type": "TESTNET_SET_LEVERAGE", "leverage": 1}
+{"ts": "2026-02-16T20:17:01.253039+00:00", "type": "TESTNET_SMOKE_START", "qty": 0.1}
+{"ts": "2026-02-16T20:17:01.755968+00:00", "type": "TESTNET_SMOKE_ENTRY", "order_id": 1695840989, "fill_price": 84.69, "exchange_side": "SHORT", "exchange_qty": 0.1, "exchange_entry": 84.69}
+{"ts": "2026-02-16T20:17:02.048092+00:00", "type": "TESTNET_SMOKE_FLATTEN", "order_id": 1695841019, "fill_price": 84.73, "qty": 0.1}
+{"ts": "2026-02-16T20:17:02.049709+00:00", "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": 10000.0, "reason": "SMOKE_TEST"}

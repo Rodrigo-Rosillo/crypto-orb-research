@@ -207,6 +207,15 @@ class BinanceLiveKlineSource:
                     # Bound close time so process can exit promptly.
                     try:
                         await asyncio.wait_for(ws.close(), timeout=1.5)
+                        # On some platforms/websockets versions, the close handshake
+                        # spawns a background close_connection task. Waiting for
+                        # wait_closed() prevents "no running event loop" warnings
+                        # after asyncio.run() tears down the loop (common on Ctrl+C).
+                        if hasattr(ws, "wait_closed"):
+                            try:
+                                await asyncio.wait_for(ws.wait_closed(), timeout=1.5)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
 
