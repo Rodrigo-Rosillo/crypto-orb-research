@@ -429,6 +429,16 @@ This creates a timestamped run folder under `reports/forward_test/` with:
 - `events.jsonl` — structured event log (signals/fills/risk events)
 - `shadow_stats.json` — engine stats (fees, liquidations, risk snapshot)
 
+Generate the **Phase 5 Step 5 divergence report** (HTML + JSON) for a run:
+
+```bash
+python scripts/forward_test_report.py --run-id <RUN_ID>
+```
+
+Outputs (inside the run folder):
+- `forward_test_report.json`
+- `forward_test_report.html`
+
 Optional: run only a window of the dataset:
 ```bash
 python scripts/forward_test.py --config config_forward_test.yaml --mode shadow --source replay --start 2025-01-01 --end 2025-06-30

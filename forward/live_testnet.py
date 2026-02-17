@@ -763,7 +763,23 @@ async def run_live_testnet(
                 state.order_rejects_today = 0
                 append_jsonl(events_path, [{"ts": _utcnow_iso(), "kind": "DAY_START", "message": "New UTC day", "day": day_str}])
 
-            append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "BAR_CLOSED", "open_time": bar.open_time.isoformat(), "close_time": bar.close_time.isoformat(), "close": float(bar.close)}])
+            append_jsonl(
+                events_path,
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "BAR_CLOSED",
+                        "open_time": bar.open_time.isoformat(),
+                        "close_time": bar.close_time.isoformat(),
+                        # Full OHLCV so Step 5 divergence report can compare to reference parquet.
+                        "open": float(bar.open),
+                        "high": float(bar.high),
+                        "low": float(bar.low),
+                        "close": float(bar.close),
+                        "volume": float(bar.volume),
+                    }
+                ],
+            )
 
             # Update df_raw
             df_raw.loc[bar.open_time] = bar.to_row()

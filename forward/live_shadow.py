@@ -444,7 +444,12 @@ async def run_live_shadow(
                         "type": "BAR_CLOSED",
                         "open_time": bar.open_time.isoformat(),
                         "close_time": bar.close_time.isoformat(),
+                        # Full OHLCV so Step 5 divergence report can compare to reference parquet.
+                        "open": float(bar.open),
+                        "high": float(bar.high),
+                        "low": float(bar.low),
                         "close": float(bar.close),
+                        "volume": float(bar.volume),
                     }
                 ],
             )

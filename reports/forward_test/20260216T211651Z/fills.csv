@@ -1,3 +1,0 @@
-timestamp_utc,order_id,symbol,side,qty,fill_price,fee,slippage_bps,exec_model
-2026-02-16T21:16:53.983848+00:00,1696008450,SOLUSDT,SHORT,0.1,85.42,0.0,0.0,testnet_market
-2026-02-16T21:16:54.273287+00:00,1696008465,SOLUSDT,LONG,0.1,85.43,0.0,0.0,testnet_market_reduce_only
