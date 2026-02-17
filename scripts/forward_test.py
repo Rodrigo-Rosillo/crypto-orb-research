@@ -550,13 +550,13 @@ def main() -> int:
         print("  - shadow_stats.json")
 
     if source == "replay" and mode == "shadow":
-        print("[forward_test] ✅ replay+shadow run completed.")
+        print("[forward_test]  replay+shadow run completed.")
     elif source == "live" and mode == "shadow":
-        print("[forward_test] ✅ live+shadow run completed.")
+        print("[forward_test]  live+shadow run completed.")
     elif source == "live" and mode == "testnet":
-        print("[forward_test] ✅ live+testnet run completed.")
+        print("[forward_test]  live+testnet run completed.")
     else:
-        print("[forward_test] ℹ️ Not implemented for this mode/source yet.")
+        print("[forward_test] [i] Not implemented for this mode/source yet.")
     try:
         return int(locals().get("exit_code", 0))
     except Exception:

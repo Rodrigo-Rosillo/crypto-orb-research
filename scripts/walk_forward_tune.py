@@ -219,7 +219,7 @@ def run_backtest_one(
     liquidations = 0
 
     if engine == "spot":
-        from scripts.spot_engine import backtest_orb_strategy  # type: ignore
+        from backtester.spot_engine import backtest_orb_strategy  # type: ignore
 
         trades, equity_curve, final_capital, total_fees = backtest_orb_strategy(
             df=df_sig,

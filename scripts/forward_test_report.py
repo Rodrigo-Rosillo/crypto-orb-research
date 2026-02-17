@@ -599,8 +599,8 @@ def main() -> int:
     json_out.write_text(stable_json(report), encoding="utf-8")
     html_out.write_text(build_html(report), encoding="utf-8")
 
-    print(f"✅ Wrote: {json_out}")
-    print(f"✅ Wrote: {html_out}")
+    print(f" Wrote: {json_out}")
+    print(f" Wrote: {html_out}")
     return 0
 
 

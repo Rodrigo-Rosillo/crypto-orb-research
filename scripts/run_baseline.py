@@ -302,7 +302,7 @@ def main() -> int:
         # IMPORTANT: For engine-switch mode, we assume you already have backtest_orb_strategy
         # in THIS file from your Phase 2 work. If you do not, re-add it (or tell me and I’ll
         # inline it here).
-        from scripts.spot_engine import backtest_orb_strategy  # type: ignore
+        from backtester.spot_engine import backtest_orb_strategy  # type: ignore
 
         trades, equity_curve, final_capital, total_fees_paid = backtest_orb_strategy(
             df=df_sig,

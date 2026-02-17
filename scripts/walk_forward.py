@@ -260,7 +260,7 @@ def main() -> int:
 
     spot_engine = None
     if args.engine == "spot":
-        from scripts.spot_engine import backtest_orb_strategy  # type: ignore
+        from backtester.spot_engine import backtest_orb_strategy  # type: ignore
 
         spot_engine = backtest_orb_strategy
 
