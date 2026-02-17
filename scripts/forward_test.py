@@ -35,6 +35,7 @@ from forward.replay import load_processed_parquet  # noqa: E402
 from forward.shadow import run_shadow_futures  # noqa: E402
 from forward.live_shadow import run_live_shadow  # noqa: E402
 from forward.live_testnet import run_live_testnet  # noqa: E402
+from forward.schemas import FILLS_COLUMNS, ORDERS_COLUMNS, POSITIONS_COLUMNS, SIGNALS_COLUMNS, validate_df_columns  # noqa: E402
 from forward.utils import ensure_repo_path, maybe_get_forward_cfg, parse_hhmm, parse_utc_ts, utc_run_id  # noqa: E402
 
 
@@ -58,21 +59,14 @@ def get_git_head() -> str:
 
 def write_skeleton(run_dir: Path) -> None:
     """Create placeholder artifacts for not-yet-implemented forward-test modes."""
-    (run_dir / "signals.csv").write_text(
-        "timestamp_utc,symbol,side,reason,adx,orb_low,orb_high,close\n", encoding="utf-8"
-    )
-    (run_dir / "orders.csv").write_text(
-        "timestamp_utc,due_timestamp_utc,order_id,symbol,side,qty,order_type,limit_price,status,status_detail,reason\n",
-        encoding="utf-8",
-    )
-    (run_dir / "fills.csv").write_text(
-        "timestamp_utc,order_id,symbol,side,qty,fill_price,fee,slippage_bps,exec_model\n",
-        encoding="utf-8",
-    )
-    (run_dir / "positions.csv").write_text(
-        "timestamp_utc,symbol,side,qty,entry_price,mark_price,unrealized_pnl,equity,margin_used,leverage\n",
-        encoding="utf-8",
-    )
+    validate_df_columns(pd.DataFrame(columns=SIGNALS_COLUMNS), SIGNALS_COLUMNS, "signals.csv")
+    validate_df_columns(pd.DataFrame(columns=ORDERS_COLUMNS), ORDERS_COLUMNS, "orders.csv")
+    validate_df_columns(pd.DataFrame(columns=FILLS_COLUMNS), FILLS_COLUMNS, "fills.csv")
+    validate_df_columns(pd.DataFrame(columns=POSITIONS_COLUMNS), POSITIONS_COLUMNS, "positions.csv")
+    (run_dir / "signals.csv").write_text(",".join(SIGNALS_COLUMNS) + "\n", encoding="utf-8")
+    (run_dir / "orders.csv").write_text(",".join(ORDERS_COLUMNS) + "\n", encoding="utf-8")
+    (run_dir / "fills.csv").write_text(",".join(FILLS_COLUMNS) + "\n", encoding="utf-8")
+    (run_dir / "positions.csv").write_text(",".join(POSITIONS_COLUMNS) + "\n", encoding="utf-8")
     (run_dir / "events.jsonl").touch(exist_ok=True)
 
 
@@ -246,35 +240,6 @@ def main() -> int:
     parquet_sha256 = ""
     rows_used = 0
 
-    # Artifact columns
-    signals_cols = ["timestamp_utc", "symbol", "side", "reason", "adx", "orb_low", "orb_high", "close"]
-    orders_cols = [
-        "timestamp_utc",
-        "due_timestamp_utc",
-        "order_id",
-        "symbol",
-        "side",
-        "qty",
-        "order_type",
-        "limit_price",
-        "status",
-        "status_detail",
-        "reason",
-    ]
-    fills_cols = ["timestamp_utc", "order_id", "symbol", "side", "qty", "fill_price", "fee", "slippage_bps", "exec_model"]
-    positions_cols = [
-        "timestamp_utc",
-        "symbol",
-        "side",
-        "qty",
-        "entry_price",
-        "mark_price",
-        "unrealized_pnl",
-        "equity",
-        "margin_used",
-        "leverage",
-    ]
-
     events: list[dict] = []
 
     if source == "replay" and mode == "shadow":
@@ -381,10 +346,24 @@ def main() -> int:
             }
         )
 
-        write_csv(signals_df, run_dir / "signals.csv", signals_cols)
-        write_csv(orders_df, run_dir / "orders.csv", orders_cols)
-        write_csv(fills_df, run_dir / "fills.csv", fills_cols)
-        write_csv(positions_df, run_dir / "positions.csv", positions_cols)
+        if signals_df.empty and len(signals_df.columns) == 0:
+            signals_df = pd.DataFrame(columns=SIGNALS_COLUMNS)
+        if orders_df.empty and len(orders_df.columns) == 0:
+            orders_df = pd.DataFrame(columns=ORDERS_COLUMNS)
+        if fills_df.empty and len(fills_df.columns) == 0:
+            fills_df = pd.DataFrame(columns=FILLS_COLUMNS)
+        if positions_df.empty and len(positions_df.columns) == 0:
+            positions_df = pd.DataFrame(columns=POSITIONS_COLUMNS)
+
+        validate_df_columns(signals_df, SIGNALS_COLUMNS, "signals.csv")
+        validate_df_columns(orders_df, ORDERS_COLUMNS, "orders.csv")
+        validate_df_columns(fills_df, FILLS_COLUMNS, "fills.csv")
+        validate_df_columns(positions_df, POSITIONS_COLUMNS, "positions.csv")
+
+        write_csv(signals_df, run_dir / "signals.csv", SIGNALS_COLUMNS)
+        write_csv(orders_df, run_dir / "orders.csv", ORDERS_COLUMNS)
+        write_csv(fills_df, run_dir / "fills.csv", FILLS_COLUMNS)
+        write_csv(positions_df, run_dir / "positions.csv", POSITIONS_COLUMNS)
         write_jsonl(run_dir / "events.jsonl", events)
 
         (run_dir / "shadow_stats.json").write_text(

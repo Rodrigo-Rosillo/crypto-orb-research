@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
@@ -10,6 +11,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from forward.schemas import FILLS_COLUMNS, validate_df_columns  # noqa: E402
 
 
 def _utcnow() -> datetime:
@@ -232,6 +239,7 @@ def execution_divergence(fills_path: Path, ref_df: Optional[pd.DataFrame]) -> Di
         return out
 
     f = pd.read_csv(fills_path)
+    validate_df_columns(f, FILLS_COLUMNS, "fills.csv")
 
     # ---- schema normalization ----
     # Different runners may emit fills with slightly different column names.
@@ -524,7 +532,7 @@ def main() -> int:
     ap.add_argument("--interval", default="30m", help="Bar interval (default 30m)")
     args = ap.parse_args()
 
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     run_dir = resolve_run_dir(repo_root, args.run_id)
     paths = get_paths(run_dir)
 

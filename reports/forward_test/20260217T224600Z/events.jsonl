@@ -1,0 +1,22 @@
+{"ts": "2026-02-17T22:46:00.941247+00:00", "type": "LIVE_RUN_START", "mode": "testnet", "source": "live", "symbol": "SOLUSDT", "timeframe": "30m", "market": "futures", "bootstrap": {"endpoint": "https://fapi.binance.com/fapi/v1/klines", "fetched_at": "2026-02-17T22:46:00.633200+00:00", "symbol": "SOLUSDT", "interval": "30m", "limit": 1000, "market": "futures", "rows": 999, "last_open_time": "2026-02-17T22:00:00+00:00", "last_close_time": "2026-02-17T22:29:59.999000+00:00"}, "trading_start_ts": "2026-02-17T22:00:00+00:00"}
+{"ts": "2026-02-17T22:46:00.941944+00:00", "type": "BOOTSTRAP_VALIDATION", "last_close_time": "2026-02-17T22:29:59.999000+00:00", "age_seconds": 960.636257, "allowed_seconds": 360000.0, "bootstrap_max_age_bars": 200, "bar_seconds": 1800}
+{"ts": "2026-02-17T22:46:00.943654+00:00", "type": "BOOTSTRAP_OK", "age_seconds": 960.636257}
+{"ts": "2026-02-17T22:46:00.944232+00:00", "type": "TESTNET_BROKER_CONFIG", "base_url": "https://demo-fapi.binance.com", "recv_window_ms": 5000}
+{"ts": "2026-02-17T22:46:01.649957+00:00", "type": "TESTNET_SET_LEVERAGE", "leverage": 1}
+{"ts": "2026-02-17T22:46:01.650774+00:00", "type": "STATE_LOADED", "path": "state.json", "found": false, "bars_processed": 0, "last_bar_open_time_utc": ""}
+{"ts": "2026-02-17T22:46:01.651632+00:00", "type": "STATE_SAVED", "path": "state.json"}
+{"ts": "2026-02-17T22:47:33.310923+00:00", "type": "CANCEL_ALL_OPEN_ORDERS"}
+{"ts": "2026-02-17T22:47:33.311508+00:00", "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": "", "reason": "STOP"}
+{"ts": "2026-02-17T22:48:08.600281+00:00", "type": "LIVE_RUN_START", "mode": "testnet", "source": "live", "symbol": "SOLUSDT", "timeframe": "30m", "market": "futures", "bootstrap": {"endpoint": "https://fapi.binance.com/fapi/v1/klines", "fetched_at": "2026-02-17T22:48:08.296390+00:00", "symbol": "SOLUSDT", "interval": "30m", "limit": 1000, "market": "futures", "rows": 999, "last_open_time": "2026-02-17T22:00:00+00:00", "last_close_time": "2026-02-17T22:29:59.999000+00:00"}, "trading_start_ts": "2026-02-17T22:00:00+00:00"}
+{"ts": "2026-02-17T22:48:08.600907+00:00", "type": "BOOTSTRAP_VALIDATION", "last_close_time": "2026-02-17T22:29:59.999000+00:00", "age_seconds": 1088.299613, "allowed_seconds": 360000.0, "bootstrap_max_age_bars": 200, "bar_seconds": 1800}
+{"ts": "2026-02-17T22:48:08.601323+00:00", "type": "BOOTSTRAP_OK", "age_seconds": 1088.299613}
+{"ts": "2026-02-17T22:48:08.601752+00:00", "type": "TESTNET_BROKER_CONFIG", "base_url": "https://demo-fapi.binance.com", "recv_window_ms": 5000}
+{"ts": "2026-02-17T22:48:09.309684+00:00", "type": "TESTNET_SET_LEVERAGE", "leverage": 1}
+{"ts": "2026-02-17T22:48:09.320197+00:00", "type": "STATE_LOADED", "path": "state.json", "found": true, "bars_processed": 0, "last_bar_open_time_utc": "2026-02-17T22:00:00+00:00"}
+{"ts": "2026-02-17T22:48:09.321032+00:00", "type": "STATE_SAVED", "path": "state.json"}
+{"ts": "2026-02-17T23:00:00.163994+00:00", "type": "WS_CONNECTED", "connect_count": 1}
+{"ts": "2026-02-17T23:00:00.164768+00:00", "kind": "DAY_START", "message": "New UTC day", "day": "2026-02-17"}
+{"ts": "2026-02-17T23:00:00.165213+00:00", "type": "BAR_CLOSED", "open_time": "2026-02-17T22:30:00+00:00", "close_time": "2026-02-17T22:59:59.999000+00:00", "open": 85.17, "high": 85.39, "low": 84.91, "close": 84.98, "volume": 98446.1}
+{"ts": "2026-02-17T23:00:01.180601+00:00", "type": "STOP_DURATION", "duration_minutes": 10}
+{"ts": "2026-02-17T23:00:03.167965+00:00", "type": "CANCEL_ALL_OPEN_ORDERS"}
+{"ts": "2026-02-17T23:00:03.168584+00:00", "type": "LIVE_RUN_END", "bars_processed": 1, "final_equity": "", "reason": "STOP"}

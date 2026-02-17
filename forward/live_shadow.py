@@ -16,11 +16,20 @@ from forward.binance_live import (
     interval_to_seconds,
 )
 from forward.shadow import build_signals
+from forward.schemas import FILLS_COLUMNS, ORDERS_COLUMNS, POSITIONS_COLUMNS, SIGNALS_COLUMNS, validate_df_columns
 from forward.stream_engine import StreamingFuturesShadowEngine
 
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _append_rows(path, rows, columns, name: str) -> None:
+    if rows:
+        validate_df_columns(pd.DataFrame(rows), columns, name)
+    else:
+        validate_df_columns(pd.DataFrame(columns=columns), columns, name)
+    append_csv_rows(path, rows, columns)
 
 
 async def run_live_shadow(
@@ -73,35 +82,6 @@ async def run_live_shadow(
     fills_path = run_dir / "fills.csv"
     positions_path = run_dir / "positions.csv"
     events_path = run_dir / "events.jsonl"
-
-    # Columns (keep aligned with scripts/forward_test.py)
-    signals_cols = ["timestamp_utc", "symbol", "side", "reason", "adx", "orb_low", "orb_high", "close"]
-    orders_cols = [
-        "timestamp_utc",
-        "due_timestamp_utc",
-        "order_id",
-        "symbol",
-        "side",
-        "qty",
-        "order_type",
-        "limit_price",
-        "status",
-        "status_detail",
-        "reason",
-    ]
-    fills_cols = ["timestamp_utc", "order_id", "symbol", "side", "qty", "fill_price", "fee", "slippage_bps", "exec_model"]
-    positions_cols = [
-        "timestamp_utc",
-        "symbol",
-        "side",
-        "qty",
-        "entry_price",
-        "mark_price",
-        "unrealized_pnl",
-        "equity",
-        "margin_used",
-        "leverage",
-    ]
 
     # Allow the CLI runner to inject an external stop_event (e.g., for graceful
     # Ctrl+C handling). If not provided, create an internal event.
@@ -481,7 +461,8 @@ async def run_live_shadow(
             # Log signals (only on the bar where the signal fires)
             if signal != 0:
                 sig_df = build_signals_df(df_sig.loc[[bar.open_time]], symbol=symbol)
-                append_csv_rows(signals_path, sig_df.to_dict(orient="records"), signals_cols)
+                sig_rows = sig_df.to_dict(orient="records")
+                _append_rows(signals_path, sig_rows, SIGNALS_COLUMNS, "signals.csv")
 
             # Do not trade on the bootstrapped last candle; start after it.
             if trading_start_ts is not None and bar.open_time <= trading_start_ts:
@@ -530,9 +511,9 @@ async def run_live_shadow(
                 p2 = {**p, "symbol": symbol, "leverage": float(engine.leverage)}
                 pos_rows.append(p2)
 
-            append_csv_rows(orders_path, order_rows, orders_cols)
-            append_csv_rows(fills_path, fill_rows, fills_cols)
-            append_csv_rows(positions_path, pos_rows, positions_cols)
+            _append_rows(orders_path, order_rows, ORDERS_COLUMNS, "orders.csv")
+            _append_rows(fills_path, fill_rows, FILLS_COLUMNS, "fills.csv")
+            _append_rows(positions_path, pos_rows, POSITIONS_COLUMNS, "positions.csv")
             append_jsonl(events_path, step.events)
 
             bars_processed += 1

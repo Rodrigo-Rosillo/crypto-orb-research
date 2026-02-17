@@ -15,6 +15,7 @@ from forward.binance_live import (
     interval_to_seconds,
 )
 from forward.shadow import build_signals
+from forward.schemas import FILLS_COLUMNS, ORDERS_COLUMNS, POSITIONS_COLUMNS, SIGNALS_COLUMNS, validate_df_columns
 from forward.state_store import OpenPositionState, RunnerState, load_state, save_state
 from forward.testnet_broker import (
     BinanceFuturesTestnetBroker,
@@ -27,6 +28,14 @@ from forward.testnet_broker import (
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _append_rows(path, rows, columns, name: str) -> None:
+    if rows:
+        validate_df_columns(pd.DataFrame(rows), columns, name)
+    else:
+        validate_df_columns(pd.DataFrame(columns=columns), columns, name)
+    append_csv_rows(path, rows, columns)
 
 
 def _float(x: Any, default: float = 0.0) -> float:
@@ -150,35 +159,6 @@ async def run_live_testnet(
     positions_path = run_dir / "positions.csv"
     events_path = run_dir / "events.jsonl"
     state_path = run_dir / "state.json"
-
-    # Columns (keep aligned with scripts/forward_test.py)
-    signals_cols = ["timestamp_utc", "symbol", "side", "reason", "adx", "orb_low", "orb_high", "close"]
-    orders_cols = [
-        "timestamp_utc",
-        "due_timestamp_utc",
-        "order_id",
-        "symbol",
-        "side",
-        "qty",
-        "order_type",
-        "limit_price",
-        "status",
-        "status_detail",
-        "reason",
-    ]
-    fills_cols = ["timestamp_utc", "order_id", "symbol", "side", "qty", "fill_price", "fee", "slippage_bps", "exec_model"]
-    positions_cols = [
-        "timestamp_utc",
-        "symbol",
-        "side",
-        "qty",
-        "entry_price",
-        "mark_price",
-        "unrealized_pnl",
-        "equity",
-        "margin_used",
-        "leverage",
-    ]
 
     # Allow the CLI runner to inject an external stop_event (e.g., for graceful
     # Ctrl+C handling). If not provided, create an internal event.
@@ -422,15 +402,17 @@ async def run_live_testnet(
                 events_path,
                 [{"ts": _utcnow_iso(), "type": "TESTNET_SMOKE_ENTRY", "order_id": entry_oid, "fill_price": float(fill_price), "exchange_side": ex_side2, "exchange_qty": float(ex_qty2), "exchange_entry": float(ex_entry2)}],
             )
-            append_csv_rows(
+            _append_rows(
                 orders_path,
                 [{"timestamp_utc": _utcnow_iso(), "due_timestamp_utc": "", "order_id": str(entry_oid or ""), "symbol": symbol, "side": "SHORT", "qty": float(smoke_qty), "order_type": "MARKET", "limit_price": "", "status": "sent", "status_detail": "smoke_entry", "reason": ""}],
-                orders_cols,
+                ORDERS_COLUMNS,
+                "orders.csv",
             )
-            append_csv_rows(
+            _append_rows(
                 fills_path,
                 [{"timestamp_utc": _utcnow_iso(), "order_id": str(entry_oid or ""), "symbol": symbol, "side": "SHORT", "qty": float(smoke_qty), "fill_price": float(fill_price), "fee": 0.0, "slippage_bps": float(slippage_bps), "exec_model": "testnet_market"}],
-                fills_cols,
+                FILLS_COLUMNS,
+                "fills.csv",
             )
 
             if smoke_auto_flatten and ex_side2 != "FLAT":
@@ -442,15 +424,17 @@ async def run_live_testnet(
                     [{"ts": _utcnow_iso(), "type": "TESTNET_SMOKE_FLATTEN", "order_id": flat_oid, "fill_price": float(flat_price), "qty": float(ex_qty2)}],
                 )
                 # Mirror the entry record: write flatten order + fill for complete audit trail.
-                append_csv_rows(
+                _append_rows(
                     orders_path,
                     [{"timestamp_utc": _utcnow_iso(), "due_timestamp_utc": "", "order_id": str(flat_oid or ""), "symbol": symbol, "side": "LONG", "qty": float(ex_qty2), "order_type": "MARKET", "limit_price": "", "status": "sent", "status_detail": "smoke_flatten", "reason": ""}],
-                    orders_cols,
+                    ORDERS_COLUMNS,
+                    "orders.csv",
                 )
-                append_csv_rows(
+                _append_rows(
                     fills_path,
                     [{"timestamp_utc": _utcnow_iso(), "order_id": str(flat_oid or ""), "symbol": symbol, "side": "LONG", "qty": float(ex_qty2), "fill_price": float(flat_price), "fee": 0.0, "slippage_bps": float(slippage_bps), "exec_model": "testnet_market_reduce_only"}],
-                    fills_cols,
+                    FILLS_COLUMNS,
+                    "fills.csv",
                 )
         except Exception as e:
             append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "TESTNET_SMOKE_FAILED", "error": str(e)}])
@@ -524,7 +508,7 @@ async def run_live_testnet(
 
     def record_position_snapshot() -> None:
         ex_side3, ex_qty3, ex_entry3, ex_upl3 = fetch_exchange_position()
-        append_csv_rows(
+        _append_rows(
             positions_path,
             [
                 {
@@ -540,7 +524,8 @@ async def run_live_testnet(
                     "leverage": float(leverage),
                 }
             ],
-            positions_cols,
+            POSITIONS_COLUMNS,
+            "positions.csv",
         )
 
     async def poll_open_orders() -> None:
@@ -607,18 +592,20 @@ async def run_live_testnet(
         if risk_limits is not None and bool(risk_limits.enabled):
             if float(leverage) > float(risk_limits.max_leverage):
                 append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "RISK_BLOCK", "reason": "max_leverage", "leverage": float(leverage), "max_leverage": float(risk_limits.max_leverage)}])
-                append_csv_rows(
+                _append_rows(
                     orders_path,
                     [{"timestamp_utc": _utcnow_iso(), "due_timestamp_utc": "", "order_id": "", "symbol": symbol, "side": pos_side, "qty": 0.0, "order_type": "MARKET", "limit_price": "", "status": "blocked", "status_detail": "risk_max_leverage", "reason": signal_type}],
-                    orders_cols,
+                    ORDERS_COLUMNS,
+                    "orders.csv",
                 )
                 return
             if float(position_size) > float(risk_limits.max_position_margin_frac):
                 append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "RISK_BLOCK", "reason": "max_position_margin_frac", "position_size": float(position_size), "max_position_margin_frac": float(risk_limits.max_position_margin_frac)}])
-                append_csv_rows(
+                _append_rows(
                     orders_path,
                     [{"timestamp_utc": _utcnow_iso(), "due_timestamp_utc": "", "order_id": "", "symbol": symbol, "side": pos_side, "qty": 0.0, "order_type": "MARKET", "limit_price": "", "status": "blocked", "status_detail": "risk_max_position_margin", "reason": signal_type}],
-                    orders_cols,
+                    ORDERS_COLUMNS,
+                    "orders.csv",
                 )
                 return
 
@@ -647,10 +634,11 @@ async def run_live_testnet(
             if int(state.order_rejects_today) > int(max_order_rejects_per_day):
                 append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "KILL_SWITCH_ORDER_REJECTS", "rejects_today": int(state.order_rejects_today), "threshold": int(max_order_rejects_per_day)}])
                 stop_event.set()
-            append_csv_rows(
+            _append_rows(
                 orders_path,
                 [{"timestamp_utc": _utcnow_iso(), "due_timestamp_utc": "", "order_id": "", "symbol": symbol, "side": pos_side, "qty": float(qty), "order_type": "MARKET", "limit_price": "", "status": "rejected", "status_detail": "entry_rejected", "reason": str(e)}],
-                orders_cols,
+                ORDERS_COLUMNS,
+                "orders.csv",
             )
             save_state(state_path, state)
             return
@@ -659,15 +647,17 @@ async def run_live_testnet(
         entry_price = _order_avg_price(entry_resp)
         exec_qty = _order_exec_qty(entry_resp)
 
-        append_csv_rows(
+        _append_rows(
             orders_path,
             [{"timestamp_utc": _utcnow_iso(), "due_timestamp_utc": "", "order_id": str(entry_oid or ""), "symbol": symbol, "side": pos_side, "qty": float(exec_qty or qty), "order_type": "MARKET", "limit_price": "", "status": "sent", "status_detail": "entry_sent", "reason": signal_type}],
-            orders_cols,
+            ORDERS_COLUMNS,
+            "orders.csv",
         )
-        append_csv_rows(
+        _append_rows(
             fills_path,
             [{"timestamp_utc": _utcnow_iso(), "order_id": str(entry_oid or ""), "symbol": symbol, "side": pos_side, "qty": float(exec_qty or qty), "fill_price": float(entry_price), "fee": 0.0, "slippage_bps": float(slippage_bps), "exec_model": "testnet_market"}],
-            fills_cols,
+            FILLS_COLUMNS,
+            "fills.csv",
         )
 
         # Compute bracket prices (mirror backtest):
@@ -712,13 +702,14 @@ async def run_live_testnet(
         except Exception as e:
             append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "SL_PLACE_FAILED", "error": str(e)}])
 
-        append_csv_rows(
+        _append_rows(
             orders_path,
             [
                 {"timestamp_utc": _utcnow_iso(), "due_timestamp_utc": "", "order_id": str(tp_oid or ""), "symbol": symbol, "side": "EXIT", "qty": float(exec_qty or qty), "order_type": "TAKE_PROFIT_MARKET", "limit_price": float(tp_price), "status": "sent", "status_detail": "tp_sent", "reason": signal_type},
                 {"timestamp_utc": _utcnow_iso(), "due_timestamp_utc": "", "order_id": str(sl_oid or ""), "symbol": symbol, "side": "EXIT", "qty": float(exec_qty or qty), "order_type": "STOP_MARKET", "limit_price": float(sl_price), "status": "sent", "status_detail": "sl_sent", "reason": signal_type},
             ],
-            orders_cols,
+            ORDERS_COLUMNS,
+            "orders.csv",
         )
 
         state.open_position = OpenPositionState(
@@ -803,7 +794,8 @@ async def run_live_testnet(
             # Log signal row if fires
             if int(row.get("signal", 0) or 0) != 0:
                 sig_df = build_signals_df(df_sig.loc[[bar.open_time]], symbol=symbol)
-                append_csv_rows(signals_path, sig_df.to_dict(orient="records"), signals_cols)
+                sig_rows = sig_df.to_dict(orient="records")
+                _append_rows(signals_path, sig_rows, SIGNALS_COLUMNS, "signals.csv")
 
             # Start after bootstrap candle
             if trading_start_ts is not None and bar.open_time <= trading_start_ts:
