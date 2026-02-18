@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+from forward.schemas import SIGNALS_COLUMNS
 
 
 def _to_iso(ts: Any) -> str:
@@ -62,9 +63,7 @@ def append_csv_rows(path: Path, rows: List[Dict[str, Any]], columns: List[str]) 
 def build_signals_df(df_sig: pd.DataFrame, symbol: str) -> pd.DataFrame:
     s = df_sig[df_sig["signal"].astype(int) != 0].copy()
     if s.empty:
-        return pd.DataFrame(
-            columns=["timestamp_utc", "symbol", "side", "reason", "adx", "orb_low", "orb_high", "close"]
-        )
+        return pd.DataFrame(columns=SIGNALS_COLUMNS)
 
     def side_from_signal(x: int) -> str:
         return "LONG" if int(x) > 0 else "SHORT"
