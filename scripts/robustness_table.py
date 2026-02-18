@@ -300,7 +300,7 @@ def main() -> int:
 
     # Valid day list (exactly 48 bars/day)
     valid_days = load_valid_days_csv(valid_days_path)
-    print(f"✅ Valid days loaded: {len(valid_days)} ({valid_days_path})")
+    print(f"[OK] Valid days loaded: {len(valid_days)} ({valid_days_path})")
 
     # Precompute indicators once
     df_ind = add_trend_indicators(df, period=adx_period)
@@ -558,8 +558,8 @@ def main() -> int:
     meta_path = out_dir / "run_metadata.json"
     meta_path.write_text(stable_json(meta), encoding="utf-8")
 
-    print(f"\n✅ Wrote: {table_csv}")
-    print(f"✅ Wrote: {summary_path}")
+    print(f"\n[OK] Wrote: {table_csv}")
+    print(f"[OK] Wrote: {summary_path}")
     return 0
 
 

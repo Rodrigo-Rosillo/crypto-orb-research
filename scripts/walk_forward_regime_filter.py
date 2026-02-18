@@ -448,8 +448,8 @@ def main() -> int:
     }
     (out_dir / "run_metadata.json").write_text(stable_json(meta), encoding="utf-8")
 
-    print(f"\n✅ Wrote: {summary_csv}")
-    print(f"✅ Wrote: {blocked_csv}")
+    print(f"\n[OK] Wrote: {summary_csv}")
+    print(f"[OK] Wrote: {blocked_csv}")
     return 0
 
 

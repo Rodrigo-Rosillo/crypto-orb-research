@@ -665,9 +665,9 @@ def main() -> int:
     }
     (out_dir / "run_metadata.json").write_text(stable_json(meta), encoding="utf-8")
 
-    print(f"\n✅ Wrote: {summary_csv}")
-    print(f"✅ Wrote: {counts_csv}")
-    print(f"✅ Wrote: {out_dir / 'aggregate_test_stats.json'}")
+    print(f"\n[OK] Wrote: {summary_csv}")
+    print(f"[OK] Wrote: {counts_csv}")
+    print(f"[OK] Wrote: {out_dir / 'aggregate_test_stats.json'}")
     return 0
 
 

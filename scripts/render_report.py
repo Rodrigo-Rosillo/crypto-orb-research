@@ -190,8 +190,8 @@ def main() -> int:
 """
 
     (baseline_dir / "report.html").write_text(report_html, encoding="utf-8")
-    print(f"✅ Wrote: {baseline_dir / 'metrics.json'}")
-    print(f"✅ Wrote: {baseline_dir / 'report.html'}")
+    print(f"[OK] Wrote: {baseline_dir / 'metrics.json'}")
+    print(f"[OK] Wrote: {baseline_dir / 'report.html'}")
     return 0
 
 

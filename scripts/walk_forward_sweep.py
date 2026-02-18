@@ -133,8 +133,8 @@ def main():
     summary_path = base_out / "walk_forward_funding_summary.csv"
     summary.to_csv(summary_path, index=False)
 
-    print(f"\n✅ Wrote combined: {combined_path}")
-    print(f"✅ Wrote summary:  {summary_path}")
+    print(f"\n[OK] Wrote combined: {combined_path}")
+    print(f"[OK] Wrote summary:  {summary_path}")
 
 
 if __name__ == "__main__":

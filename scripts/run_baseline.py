@@ -165,15 +165,6 @@ def maybe_write_equity_plot(equity_df: pd.DataFrame, out_path: Path) -> None:
         return
 
 
-
-    plt.figure()
-    plt.plot(equity_df["timestamp"], equity_df["equity"])
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(out_path)
-    plt.close()
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description="Run ORB backtest (deterministic) with engine switch")
     ap.add_argument("--config", default="config.yaml", help="Path to config.yaml (relative to repo root by default)")
@@ -243,7 +234,7 @@ def main() -> int:
 
     # Valid days (48 bars/day)
     valid_days = load_valid_days_csv(valid_days_path)
-    print(f"✅ Valid days loaded: {len(valid_days)} ({valid_days_path})")
+    print(f"[OK] Valid days loaded: {len(valid_days)} ({valid_days_path})")
 
     # Load data (prefer processed parquet if available)
     processed_path = REPO_ROOT / "data" / "processed" / f"{symbol}_{timeframe}.parquet"
@@ -257,7 +248,7 @@ def main() -> int:
         data_dir = processed_path.parent
         if manifest_path.exists():
             raw_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        print(f"✅ Loaded candles: {len(df_raw)}  ({symbol} {timeframe})  [processed parquet]")
+        print(f"[OK] Loaded candles: {len(df_raw)}  ({symbol} {timeframe})  [processed parquet]")
     else:
         df_raw, raw_manifest, data_dir, used_files = load_raw_dataset_from_manifest(
             manifest_path=manifest_path,
@@ -265,7 +256,7 @@ def main() -> int:
             symbol=symbol,
             timeframe=timeframe,
         )
-        print(f"✅ Loaded candles: {len(df_raw)}  ({symbol} {timeframe})  [raw CSVs]")
+        print(f"[OK] Loaded candles: {len(df_raw)}  ({symbol} {timeframe})  [raw CSVs]")
 
 # Strategy pipeline
     df_ind = add_trend_indicators(df_raw, period=adx_period)
@@ -495,7 +486,7 @@ def main() -> int:
     meta_path.write_text(stable_json(meta), encoding="utf-8")
     hashes_path.write_text(stable_json(hashes), encoding="utf-8")
 
-    print(f"\n✅ Wrote outputs to: {out_dir}")
+    print(f"\n[OK] Wrote outputs to: {out_dir}")
     for k in outputs.keys():
         print(f"  - {k}")
 

@@ -760,7 +760,7 @@ def main() -> int:
     meta_path.write_text(stable_json(meta), encoding="utf-8")
     hashes_path.write_text(stable_json(hashes), encoding="utf-8")
 
-    print(f"\n✅ Wrote summary: {summary_csv}")
+    print(f"\n[OK] Wrote summary: {summary_csv}")
     return 0
 
 

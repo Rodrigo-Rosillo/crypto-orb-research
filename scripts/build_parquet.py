@@ -246,10 +246,10 @@ def main() -> int:
 
     processed_manifest_path.write_text(stable_json(processed_manifest), encoding="utf-8")
 
-    print(f"✅ Wrote parquet: {parquet_path}")
-    print(f"✅ Wrote: {valid_days_path}")
-    print(f"✅ Wrote: {invalid_days_path}")
-    print(f"✅ Wrote: {processed_manifest_path}")
+    print(f"[OK] Wrote parquet: {parquet_path}")
+    print(f"[OK] Wrote: {valid_days_path}")
+    print(f"[OK] Wrote: {invalid_days_path}")
+    print(f"[OK] Wrote: {processed_manifest_path}")
 
     return 0
 

@@ -1,0 +1,466 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset='utf-8' />
+  <title>Forward Test Report</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color:#111; }
+    h1,h2,h3 { margin: 0 0 12px 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    .card { border: 1px solid #e5e5e5; border-radius: 12px; padding: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+    th { text-align: left; width: 40%; color:#333; }
+    pre { font-size: 12px; }
+    .small { color:#666; font-size: 12px; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#f3f4f6; font-size:12px; }
+  </style>
+</head>
+<body>
+  <h1>Forward Test Divergence Report</h1>
+  <p class='small'>Generated at 2026-02-18T22:15:55.789121+00:00 for run <span class='pill'>20260218T221525Z</span></p>
+
+  <div class='grid'>
+    <div class='card'>
+      <h2>Run Summary</h2>
+      <table><tr><th>run_id</th><td><pre style='margin:0; white-space:pre-wrap'>20260218T221525Z</pre></td></tr><tr><th>mode</th><td><pre style='margin:0; white-space:pre-wrap'>None</pre></td></tr><tr><th>source</th><td><pre style='margin:0; white-space:pre-wrap'>None</pre></td></tr><tr><th>symbol</th><td><pre style='margin:0; white-space:pre-wrap'>SOLUSDT</pre></td></tr><tr><th>timeframe</th><td><pre style='margin:0; white-space:pre-wrap'>30m</pre></td></tr><tr><th>market</th><td><pre style='margin:0; white-space:pre-wrap'>None</pre></td></tr><tr><th>bars_observed</th><td><pre style='margin:0; white-space:pre-wrap'>0</pre></td></tr><tr><th>bars_processed</th><td><pre style='margin:0; white-space:pre-wrap'>0</pre></td></tr><tr><th>last_bar_open_time_utc</th><td><pre style='margin:0; white-space:pre-wrap'></pre></td></tr><tr><th>config_sha256</th><td><pre style='margin:0; white-space:pre-wrap'>39962a856f9054bf977ae874db4f8e6ea0b82cfa58ba873673a4b72a4f015c67</pre></td></tr><tr><th>dataset_sha256</th><td><pre style='margin:0; white-space:pre-wrap'>None</pre></td></tr><tr><th>reference_parquet</th><td><pre style='margin:0; white-space:pre-wrap'>C:\Users\wrodr\Documents\GitHub\crypto-orb-research\data\processed\SOLUSDT_30m.parquet</pre></td></tr><tr><th>reference_note</th><td><pre style='margin:0; white-space:pre-wrap'></pre></td></tr></table>
+    </div>
+    <div class='card'>
+      <h2>Timing Divergence</h2>
+      <table><tr><td colspan=2>No data</td></tr></table>
+      <h3 style='margin-top:12px;'>Missed Bars</h3>
+      <table><tr><td colspan=2>No data</td></tr></table>
+    </div>
+  </div>
+
+  <div class='card' style='margin-top:16px;'>
+    <h2>Data Divergence (Live vs Reference Parquet)</h2>
+    <p class='small'>No BAR_CLOSED events to compare.</p>
+    <table><tr><td colspan=2>No data</td></tr></table>
+    <h3 style='margin-top:12px;'>Top Examples (bps)</h3>
+    <p class='small'>No examples.</p>
+  </div>
+
+  <div class='card' style='margin-top:16px;'>
+    <h2>Execution Divergence (Fill vs Next-Open Reference)</h2>
+    <p class='small'></p>
+    <table><tr><th>entry_fills_compared</th><td><pre style='margin:0; white-space:pre-wrap'>164</pre></td></tr><tr><th>abs_bps_p50</th><td><pre style='margin:0; white-space:pre-wrap'>0.0</pre></td></tr><tr><th>abs_bps_p95</th><td><pre style='margin:0; white-space:pre-wrap'>0.0</pre></td></tr><tr><th>abs_bps_max</th><td><pre style='margin:0; white-space:pre-wrap'>0.0</pre></td></tr></table>
+    <h3 style='margin-top:12px;'>Top Examples (bps)</h3>
+    <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>fill_time</th>
+      <th>type</th>
+      <th>fill_price</th>
+      <th>ref_open</th>
+      <th>slippage_bps</th>
+      <th>order_id</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2021-01-11T17:00:00+00:00</td>
+      <td>sell</td>
+      <td>2.6772</td>
+      <td>2.6772</td>
+      <td>0.0</td>
+      <td>T00000_20210111T170000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-01-22T00:00:00+00:00</td>
+      <td>sell</td>
+      <td>2.9813</td>
+      <td>2.9813</td>
+      <td>0.0</td>
+      <td>T00001_20210122T000000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-02-16T18:30:00+00:00</td>
+      <td>sell</td>
+      <td>8.2058</td>
+      <td>8.2058</td>
+      <td>0.0</td>
+      <td>T00002_20210216T183000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-02-25T23:30:00+00:00</td>
+      <td>sell</td>
+      <td>14.2584</td>
+      <td>14.2584</td>
+      <td>0.0</td>
+      <td>T00003_20210225T233000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-03-12T23:30:00+00:00</td>
+      <td>sell</td>
+      <td>14.5384</td>
+      <td>14.5384</td>
+      <td>0.0</td>
+      <td>T00004_20210312T233000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-04-03T16:00:00+00:00</td>
+      <td>sell</td>
+      <td>21.0341</td>
+      <td>21.0341</td>
+      <td>0.0</td>
+      <td>T00005_20210403T160000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-05-23T16:30:00+00:00</td>
+      <td>sell</td>
+      <td>20.5610</td>
+      <td>20.5610</td>
+      <td>0.0</td>
+      <td>T00006_20210523T163000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-06-11T23:30:00+00:00</td>
+      <td>sell</td>
+      <td>35.8950</td>
+      <td>35.8950</td>
+      <td>0.0</td>
+      <td>T00007_20210611T233000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-06-23T16:00:00+00:00</td>
+      <td>sell</td>
+      <td>29.0860</td>
+      <td>29.0860</td>
+      <td>0.0</td>
+      <td>T00008_20210623T160000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-07-12T18:30:00+00:00</td>
+      <td>sell</td>
+      <td>30.3870</td>
+      <td>30.3870</td>
+      <td>0.0</td>
+      <td>T00009_20210712T183000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-08-25T00:00:00+00:00</td>
+      <td>sell</td>
+      <td>70.5060</td>
+      <td>70.5060</td>
+      <td>0.0</td>
+      <td>T00010_20210825T000000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-10-11T21:00:00+00:00</td>
+      <td>sell</td>
+      <td>141.7360</td>
+      <td>141.7360</td>
+      <td>0.0</td>
+      <td>T00011_20211011T210000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-11-12T15:00:00+00:00</td>
+      <td>sell</td>
+      <td>225.7230</td>
+      <td>225.7230</td>
+      <td>0.0</td>
+      <td>T00012_20211112T150000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-11-18T15:30:00+00:00</td>
+      <td>sell</td>
+      <td>199.3090</td>
+      <td>199.3090</td>
+      <td>0.0</td>
+      <td>T00013_20211118T153000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-12-03T23:30:00+00:00</td>
+      <td>sell</td>
+      <td>213.0760</td>
+      <td>213.0760</td>
+      <td>0.0</td>
+      <td>T00014_20211203T233000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-12-13T15:30:00+00:00</td>
+      <td>sell</td>
+      <td>157.8200</td>
+      <td>157.8200</td>
+      <td>0.0</td>
+      <td>T00015_20211213T153000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2021-12-28T19:00:00+00:00</td>
+      <td>sell</td>
+      <td>179.0900</td>
+      <td>179.0900</td>
+      <td>0.0</td>
+      <td>T00016_20211228T190000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2022-01-05T22:00:00+00:00</td>
+      <td>sell</td>
+      <td>153.4000</td>
+      <td>153.4000</td>
+      <td>0.0</td>
+      <td>T00017_20220105T220000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2022-01-17T16:30:00+00:00</td>
+      <td>sell</td>
+      <td>140.8500</td>
+      <td>140.8500</td>
+      <td>0.0</td>
+      <td>T00018_20220117T163000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+    <tr>
+      <td>2022-01-22T15:00:00+00:00</td>
+      <td>sell</td>
+      <td>96.0500</td>
+      <td>96.0500</td>
+      <td>0.0</td>
+      <td>T00019_20220122T150000Z_downtrend_breakdown_ENTRY</td>
+    </tr>
+  </tbody>
+</table>
+  </div>
+
+  <div class='card' style='margin-top:16px;'>
+    <h2>Reject Divergence</h2>
+    <table><tr><th>reject_events</th><td><pre style='margin:0; white-space:pre-wrap'>0</pre></td></tr></table>
+    <h3 style='margin-top:12px;'>Examples</h3>
+    <p class='small'>No examples.</p>
+  </div>
+
+  <div class='card' style='margin-top:16px;'>
+    <h2>Funding Divergence</h2>
+    <table><tr><th>assumed_funding_per_8h</th><td><pre style='margin:0; white-space:pre-wrap'>None</pre></td></tr><tr><th>realized_records</th><td><pre style='margin:0; white-space:pre-wrap'>0</pre></td></tr><tr><th>realized_total</th><td><pre style='margin:0; white-space:pre-wrap'>0.0</pre></td></tr><tr><th>notes</th><td><pre style='margin:0; white-space:pre-wrap'>Realized funding is only available if the runner logs funding income events (optional).</pre></td></tr></table>
+  </div>
+
+  <div class='card' style='margin-top:16px;'>
+    <h2>Raw JSON</h2>
+    <p class='small'>For programmatic use, open forward_test_report.json in the same run folder.</p>
+    <pre style='white-space:pre-wrap'>{
+  &quot;generated_at_utc&quot;: &quot;2026-02-18T22:15:55.789121+00:00&quot;,
+  &quot;run&quot;: {
+    &quot;run_id&quot;: &quot;20260218T221525Z&quot;,
+    &quot;mode&quot;: null,
+    &quot;source&quot;: null,
+    &quot;symbol&quot;: &quot;SOLUSDT&quot;,
+    &quot;timeframe&quot;: &quot;30m&quot;,
+    &quot;market&quot;: null,
+    &quot;bars_observed&quot;: 0,
+    &quot;bars_processed&quot;: 0,
+    &quot;last_bar_open_time_utc&quot;: &quot;&quot;,
+    &quot;config_sha256&quot;: &quot;39962a856f9054bf977ae874db4f8e6ea0b82cfa58ba873673a4b72a4f015c67&quot;,
+    &quot;dataset_sha256&quot;: null,
+    &quot;reference_parquet&quot;: &quot;C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\data\\processed\\SOLUSDT_30m.parquet&quot;,
+    &quot;reference_note&quot;: &quot;&quot;
+  },
+  &quot;timing_divergence&quot;: {
+    &quot;bars&quot;: 0,
+    &quot;ingest_delay_seconds&quot;: {},
+    &quot;missed_bars&quot;: {}
+  },
+  &quot;data_divergence&quot;: {
+    &quot;available&quot;: false,
+    &quot;notes&quot;: &quot;No BAR_CLOSED events to compare.&quot;,
+    &quot;summary&quot;: {},
+    &quot;examples&quot;: []
+  },
+  &quot;execution_divergence&quot;: {
+    &quot;available&quot;: true,
+    &quot;notes&quot;: &quot;&quot;,
+    &quot;summary&quot;: {
+      &quot;entry_fills_compared&quot;: 164,
+      &quot;abs_bps_p50&quot;: 0.0,
+      &quot;abs_bps_p95&quot;: 0.0,
+      &quot;abs_bps_max&quot;: 0.0
+    },
+    &quot;examples&quot;: [
+      {
+        &quot;fill_time&quot;: &quot;2021-01-11T17:00:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 2.6772,
+        &quot;ref_open&quot;: 2.6772,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00000_20210111T170000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-01-22T00:00:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 2.9813,
+        &quot;ref_open&quot;: 2.9813,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00001_20210122T000000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-02-16T18:30:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 8.2058,
+        &quot;ref_open&quot;: 8.2058,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00002_20210216T183000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-02-25T23:30:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 14.2584,
+        &quot;ref_open&quot;: 14.2584,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00003_20210225T233000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-03-12T23:30:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 14.5384,
+        &quot;ref_open&quot;: 14.5384,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00004_20210312T233000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-04-03T16:00:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 21.0341,
+        &quot;ref_open&quot;: 21.0341,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00005_20210403T160000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-05-23T16:30:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 20.561,
+        &quot;ref_open&quot;: 20.561,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00006_20210523T163000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-06-11T23:30:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 35.895,
+        &quot;ref_open&quot;: 35.895,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00007_20210611T233000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-06-23T16:00:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 29.086,
+        &quot;ref_open&quot;: 29.086,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00008_20210623T160000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-07-12T18:30:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 30.387,
+        &quot;ref_open&quot;: 30.387,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00009_20210712T183000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-08-25T00:00:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 70.506,
+        &quot;ref_open&quot;: 70.506,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00010_20210825T000000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-10-11T21:00:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 141.736,
+        &quot;ref_open&quot;: 141.736,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00011_20211011T210000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-11-12T15:00:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 225.723,
+        &quot;ref_open&quot;: 225.723,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00012_20211112T150000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-11-18T15:30:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 199.309,
+        &quot;ref_open&quot;: 199.309,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00013_20211118T153000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-12-03T23:30:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 213.076,
+        &quot;ref_open&quot;: 213.076,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00014_20211203T233000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-12-13T15:30:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 157.82,
+        &quot;ref_open&quot;: 157.82,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00015_20211213T153000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2021-12-28T19:00:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 179.09,
+        &quot;ref_open&quot;: 179.09,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00016_20211228T190000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2022-01-05T22:00:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 153.4,
+        &quot;ref_open&quot;: 153.4,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00017_20220105T220000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2022-01-17T16:30:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 140.85,
+        &quot;ref_open&quot;: 140.85,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00018_20220117T163000Z_downtrend_breakdown_ENTRY&quot;
+      },
+      {
+        &quot;fill_time&quot;: &quot;2022-01-22T15:00:00+00:00&quot;,
+        &quot;type&quot;: &quot;sell&quot;,
+        &quot;fill_price&quot;: 96.05,
+        &quot;ref_open&quot;: 96.05,
+        &quot;slippage_bps&quot;: 0.0,
+        &quot;order_id&quot;: &quot;T00019_20220122T150000Z_downtrend_breakdown_ENTRY&quot;
+      }
+    ]
+  },
+  &quot;reject_divergence&quot;: {
+    &quot;available&quot;: true,
+    &quot;summary&quot;: {
+      &quot;reject_events&quot;: 0
+    },
+    &quot;examples&quot;: []
+  },
+  &quot;funding_divergence&quot;: {
+    &quot;assumed_funding_per_8h&quot;: null,
+    &quot;realized_records&quot;: 0,
+    &quot;realized_total&quot;: 0.0,
+    &quot;notes&quot;: &quot;Realized funding is only available if the runner logs funding income events (optional).&quot;
+  },
+  &quot;notes&quot;: {
+    &quot;how_to_use&quot;: &quot;python scripts/forward_test_report.py --run-id &lt;RUN_ID&gt;&quot;,
+    &quot;inputs&quot;: {
+      &quot;events&quot;: &quot;C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\forward_test\\20260218T221525Z\\events.jsonl&quot;,
+      &quot;signals&quot;: &quot;C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\forward_test\\20260218T221525Z\\signals.csv&quot;,
+      &quot;orders&quot;: &quot;C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\forward_test\\20260218T221525Z\\orders.csv&quot;,
+      &quot;fills&quot;: &quot;C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\forward_test\\20260218T221525Z\\fills.csv&quot;,
+      &quot;positions&quot;: &quot;C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\forward_test\\20260218T221525Z\\positions.csv&quot;
+    }
+  }
+}</pre>
+  </div>
+</body>
+</html>

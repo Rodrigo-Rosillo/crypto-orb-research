@@ -518,7 +518,7 @@ def main() -> int:
     }
     (out_dir / "run_metadata.json").write_text(stable_json(run_meta), encoding="utf-8")
 
-    print(f"✅ Regime reports written to: {out_dir}")
+    print(f"[OK] Regime reports written to: {out_dir}")
     print("Key outputs:")
     for f in ["by_volatility.csv", "by_trend_vs_chop.csv", "by_day_of_week.csv", "by_month.csv", "crosstab_vol_x_adx.csv"]:
         print(f" - {out_dir / f}")

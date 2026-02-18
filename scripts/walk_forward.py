@@ -556,7 +556,7 @@ def main() -> int:
     ]
     (out_dir / "walk_forward_report.html").write_text("\n".join(html_lines), encoding="utf-8")
 
-    print(f"\n✅ Walk-forward written to: {out_dir}")
+    print(f"\n[OK] Walk-forward written to: {out_dir}")
     print("  - walk_forward_folds.csv")
     print("  - walk_forward_report.html")
     print("  - walk_forward_metadata.json")

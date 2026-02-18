@@ -286,8 +286,8 @@ def main() -> int:
     report_path = out_dir / "bootstrap_report.json"
     report_path.write_text(stable_json(report), encoding="utf-8")
 
-    print(f"✅ Wrote: {report_path}")
-    print(f"✅ Wrote: {samples_csv}")
+    print(f"[OK] Wrote: {report_path}")
+    print(f"[OK] Wrote: {samples_csv}")
     print("\nCI summary:")
     for k, v in ci.items():
         print(f"  - {k}: [{v['ci_low']:.4f}, {v['ci_high']:.4f}] (median {v['median']:.4f})")

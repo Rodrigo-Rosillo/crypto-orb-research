@@ -212,8 +212,8 @@ def main():
     spot_df.to_csv(spot_out, index=False)
     fut_df.to_csv(fut_out, index=False)
 
-    print(f"\n✅ Wrote: {spot_out}")
-    print(f"✅ Wrote: {fut_out}")
+    print(f"\n[OK] Wrote: {spot_out}")
+    print(f"[OK] Wrote: {fut_out}")
 
     # Convenience slices: one CSV per funding value
     for fund in sorted(set(fundings)):
@@ -222,7 +222,7 @@ def main():
             continue
         out = base / f"grid_summary_futures_funding_{fmt_token(fund)}.csv"
         fdf.to_csv(out, index=False)
-        print(f"✅ Wrote: {out}")
+        print(f"[OK] Wrote: {out}")
 
 
 if __name__ == "__main__":

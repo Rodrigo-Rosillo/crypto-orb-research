@@ -378,8 +378,8 @@ def main() -> int:
     (out_dir / "quality.json").write_text(stable_json(report), encoding="utf-8")
     (out_dir / "quality.html").write_text(build_html(report), encoding="utf-8")
 
-    print(f"✅ Wrote: {out_dir / 'quality.json'}")
-    print(f"✅ Wrote: {out_dir / 'quality.html'}")
+    print(f"[OK] Wrote: {out_dir / 'quality.json'}")
+    print(f"[OK] Wrote: {out_dir / 'quality.html'}")
     return 0
 
 
