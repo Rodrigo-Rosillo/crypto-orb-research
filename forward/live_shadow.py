@@ -15,6 +15,8 @@ from forward.binance_live import (
     fetch_server_time_ms,
     interval_to_seconds,
 )
+from forward.live_shadow_bootstrap import validate_bootstrap
+from forward.live_shadow_step import process_bar_step
 from forward.shadow import build_signals
 from forward.schemas import FILLS_COLUMNS, ORDERS_COLUMNS, POSITIONS_COLUMNS, SIGNALS_COLUMNS, validate_df_columns
 from forward.stream_engine import StreamingFuturesShadowEngine
@@ -102,129 +104,33 @@ async def run_live_shadow(
     bam = (live_cfg or {}).get("bootstrap_max_age_bars", default_age_bars)
     if bam is None:
         bam = default_age_bars
-    bootstrap_max_age_bars = int(bam)
-    bootstrap_max_age_bars = max(1, bootstrap_max_age_bars)
-    allowed_bootstrap_age_s = float(bar_seconds * bootstrap_max_age_bars)
+    bootstrap_max_age_bars = max(1, int(bam))
 
-    # Parse last closed candle time from metadata if available.
-    last_close_iso = str((rest_meta or {}).get("last_close_time", "") or "")
-    last_close_ts: Optional[pd.Timestamp] = None
-    if last_close_iso:
-        try:
-            last_close_ts = pd.to_datetime(last_close_iso, utc=True)
-        except Exception:
-            last_close_ts = None
-    if last_close_ts is None and len(df_raw.index):
-        # Fallback: approximate close as open + interval.
-        last_close_ts = df_raw.index[-1] + pd.Timedelta(seconds=int(bar_seconds))
-
-    now_utc = datetime.now(timezone.utc)
-    bootstrap_age_s = None
-    if last_close_ts is not None:
-        bootstrap_age_s = float((now_utc - last_close_ts.to_pydatetime()).total_seconds())
-
-    # Local clock skew check vs Binance server time
     clock_skew_ms = None
     clock_meta: Dict[str, Any] = {}
+    now_utc = datetime.now(timezone.utc)
     try:
         server_ms, clock_meta = fetch_server_time_ms(market=market)
         local_ms = int(now_utc.timestamp() * 1000)
         clock_skew_ms = int(local_ms - int(server_ms))
     except Exception as e:
-        append_jsonl(
-            events_path,
-            [
-                {
-                    "ts": _utcnow_iso(),
-                    "type": "CLOCK_SKEW_CHECK_FAILED",
-                    "error": str(e),
-                }
-            ],
-        )
+        clock_meta = {"clock_skew_check_failed_error": str(e)}
 
-
-    # Marker: we only start trading AFTER the latest bootstrapped candle.
-    trading_start_ts: Optional[pd.Timestamp] = None
-    if len(df_raw.index):
-        trading_start_ts = df_raw.index[-1]
-
-    append_jsonl(
-        events_path,
-        [
-            {
-                "ts": _utcnow_iso(),
-                "type": "LIVE_RUN_START",
-                "mode": "shadow",
-                "source": "live",
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "market": market,
-                "bootstrap": rest_meta,
-                "trading_start_ts": trading_start_ts.isoformat() if trading_start_ts is not None else "",
-            }
-        ],
+    bootstrap = validate_bootstrap(
+        df_raw=df_raw,
+        rest_meta=rest_meta,
+        bar_seconds=bar_seconds,
+        bootstrap_max_age_bars=bootstrap_max_age_bars,
+        symbol=symbol,
+        timeframe=timeframe,
+        market=market,
+        initial_capital=float(initial_capital),
+        clock_skew_ms=clock_skew_ms,
+        clock_meta=clock_meta,
     )
+    append_jsonl(events_path, bootstrap.events_to_log)
 
-    # Emit bootstrap freshness + clock skew signals before streaming.
-    # Clock skew thresholds
-    skew_warn_ms = 5_000
-    skew_fatal_ms = 30_000
-    if clock_skew_ms is not None:
-        if abs(clock_skew_ms) > skew_fatal_ms:
-            append_jsonl(
-                events_path,
-                [
-                    {
-                        "ts": _utcnow_iso(),
-                        "type": "CLOCK_SKEW_FATAL",
-                        "clock_skew_ms": int(clock_skew_ms),
-                        "warn_ms": int(skew_warn_ms),
-                        "fatal_ms": int(skew_fatal_ms),
-                        "server_time": clock_meta,
-                    }
-                ],
-            )
-            # Clean shutdown: don't start WS/heartbeat.
-            append_jsonl(
-                events_path,
-                [
-                    {
-                        "ts": _utcnow_iso(),
-                        "type": "LIVE_RUN_END",
-                        "bars_processed": 0,
-                        "final_equity": float(initial_capital),
-                        "reason": "CLOCK_SKEW_FATAL",
-                    }
-                ],
-            )
-            return 0
-
-        if abs(clock_skew_ms) > skew_warn_ms:
-            append_jsonl(
-                events_path,
-                [
-                    {
-                        "ts": _utcnow_iso(),
-                        "type": "CLOCK_SKEW_WARN",
-                        "clock_skew_ms": int(clock_skew_ms),
-                        "warn_ms": int(skew_warn_ms),
-                        "fatal_ms": int(skew_fatal_ms),
-                        "server_time": clock_meta,
-                    }
-                ],
-            )
-
-    if last_close_ts is None:
-        append_jsonl(
-            events_path,
-            [
-                {
-                    "ts": _utcnow_iso(),
-                    "type": "BOOTSTRAP_EMPTY_OR_INVALID",
-                    "bootstrap_rows": int(len(df_raw.index)),
-                }
-            ],
-        )
+    if bootstrap.fatal_reason:
         append_jsonl(
             events_path,
             [
@@ -233,64 +139,14 @@ async def run_live_shadow(
                     "type": "LIVE_RUN_END",
                     "bars_processed": 0,
                     "final_equity": float(initial_capital),
-                    "reason": "BOOTSTRAP_EMPTY_OR_INVALID",
+                    "reason": str(bootstrap.fatal_reason),
                 }
             ],
         )
         return 0
 
-    append_jsonl(
-        events_path,
-        [
-            {
-                "ts": _utcnow_iso(),
-                "type": "BOOTSTRAP_VALIDATION",
-                "last_close_time": last_close_ts.isoformat(),
-                "age_seconds": float(bootstrap_age_s) if bootstrap_age_s is not None else None,
-                "allowed_seconds": float(allowed_bootstrap_age_s),
-                "bootstrap_max_age_bars": int(bootstrap_max_age_bars),
-                "bar_seconds": int(bar_seconds),
-            }
-        ],
-    )
-
-    if bootstrap_age_s is not None and bootstrap_age_s > allowed_bootstrap_age_s:
-        append_jsonl(
-            events_path,
-            [
-                {
-                    "ts": _utcnow_iso(),
-                    "type": "BOOTSTRAP_STALE",
-                    "age_seconds": float(bootstrap_age_s),
-                    "allowed_seconds": float(allowed_bootstrap_age_s),
-                    "bootstrap_max_age_bars": int(bootstrap_max_age_bars),
-                }
-            ],
-        )
-        append_jsonl(
-            events_path,
-            [
-                {
-                    "ts": _utcnow_iso(),
-                    "type": "LIVE_RUN_END",
-                    "bars_processed": 0,
-                    "final_equity": float(initial_capital),
-                    "reason": "BOOTSTRAP_STALE",
-                }
-            ],
-        )
-        return 0
-    else:
-        append_jsonl(
-            events_path,
-            [
-                {
-                    "ts": _utcnow_iso(),
-                    "type": "BOOTSTRAP_OK",
-                    "age_seconds": float(bootstrap_age_s) if bootstrap_age_s is not None else None,
-                }
-            ],
-        )
+    last_close_ts = bootstrap.last_close_ts
+    trading_start_ts = bootstrap.trading_start_ts
 
     engine_cfg = FuturesEngineConfig(
         initial_capital=float(initial_capital),
@@ -455,8 +311,6 @@ async def run_live_shadow(
 
             row = df_sig.loc[bar.open_time]
             signal = int(row.get("signal", 0) or 0)
-            signal_type = str(row.get("signal_type", "") or "")
-            day = row.get("date")
 
             # Log signals (only on the bar where the signal fires)
             if signal != 0:
@@ -469,52 +323,21 @@ async def run_live_shadow(
                 continue
 
             # Engine step
-            step = engine.on_bar(
-                ts=bar.open_time,
-                bar_open=float(bar.open),
-                bar_high=float(bar.high),
-                bar_low=float(bar.low),
-                bar_close=float(bar.close),
-                current_date=day,
-                signal=signal,
-                signal_type=signal_type,
-                orb_high=(None if pd.isna(row.get("orb_high")) else float(row.get("orb_high"))),
-                orb_low=(None if pd.isna(row.get("orb_low")) else float(row.get("orb_low"))),
-                valid_days=valid_days,
+            row_for_step = row.copy()
+            row_for_step["_valid_days"] = valid_days
+            order_rows, fill_rows, pos_rows, step_events, trade_counter = process_bar_step(
+                engine=engine,
+                bar=bar,
+                row=row_for_step,
+                symbol=symbol,
+                bar_seconds=bar_seconds,
+                delay_bars=delay_bars,
+                trade_counter=trade_counter,
             )
-
-            # Fill in symbol + IDs, and due timestamps for scheduled orders
-            order_rows = []
-            for o in step.orders:
-                # Use signal bar time for order id (deterministic)
-                oid = f"LIVESIG_{bar.open_time.tz_convert('UTC').strftime('%Y%m%dT%H%M%SZ')}_{signal_type}".replace(" ", "")
-                due_ts = (bar.open_time + pd.Timedelta(seconds=bar_seconds * delay_bars)).tz_convert("UTC")
-                o2 = {
-                    **o,
-                    "order_id": oid,
-                    "symbol": symbol,
-                    "due_timestamp_utc": due_ts.isoformat(),
-                }
-                order_rows.append(o2)
-
-            fill_rows = []
-            for f in step.fills:
-                tid = f"T{trade_counter:05d}_{bar.open_time.tz_convert('UTC').strftime('%Y%m%dT%H%M%SZ')}_{signal_type}".replace(
-                    " ", ""
-                )
-                trade_counter += 1
-                f2 = {**f, "order_id": tid, "symbol": symbol}
-                fill_rows.append(f2)
-
-            pos_rows = []
-            for p in step.positions:
-                p2 = {**p, "symbol": symbol, "leverage": float(engine.leverage)}
-                pos_rows.append(p2)
-
             _append_rows(orders_path, order_rows, ORDERS_COLUMNS, "orders.csv")
             _append_rows(fills_path, fill_rows, FILLS_COLUMNS, "fills.csv")
             _append_rows(positions_path, pos_rows, POSITIONS_COLUMNS, "positions.csv")
-            append_jsonl(events_path, step.events)
+            append_jsonl(events_path, step_events)
 
             bars_processed += 1
 

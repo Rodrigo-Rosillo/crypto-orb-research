@@ -10,10 +10,10 @@
   },
   "mode": "testnet",
   "note": "Phase 5 Step 4: live source + Binance futures TESTNET order placement.",
-  "out_dir": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\forward_test\\20260217T224600Z",
+  "out_dir": "C:\\Users\\wrodr\\Documents\\GitHub\\crypto-orb-research\\reports\\forward_test\\20260218T212940Z",
   "platform": "Windows-10-10.0.19045-SP0",
   "python": "3.13.12 (tags/v3.13.12:1cbe481, Feb  3 2026, 18:22:25) [MSC v.1944 64 bit (AMD64)]",
-  "repo_git_head": "5b9dc2fff603360a5a2fbc1cedb1e65a9cc4d6f0",
+  "repo_git_head": "261e58a8440244b291c0b61845b6b1f132ca618c",
   "risk_limits": {
     "enabled": true,
     "kill_switch": {
@@ -28,7 +28,7 @@
     "max_leverage": 2.0,
     "max_position_margin_frac": 0.95
   },
-  "run_id": "20260217T224600Z",
+  "run_id": "20260218T212940Z",
   "source": "live",
-  "started_utc": "2026-02-17T22:48:07.806781+00:00"
+  "started_utc": "2026-02-18T21:37:42.915783+00:00"
 }
