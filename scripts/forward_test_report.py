@@ -238,19 +238,8 @@ def execution_divergence(fills_path: Path, ref_df: Optional[pd.DataFrame]) -> Di
     f = pd.read_csv(fills_path)
     validate_df_columns(f, FILLS_COLUMNS, "fills.csv")
 
-    # ---- schema normalization ----
-    # Different runners may emit fills with slightly different column names.
-    # We normalize to: fill_time, fill_price, fill_kind (optional), type (optional), order_id.
-    time_col = "fill_time" if "fill_time" in f.columns else (
-        "timestamp_utc" if "timestamp_utc" in f.columns else (
-            "timestamp" if "timestamp" in f.columns else (
-                "ts" if "ts" in f.columns else ""
-            )
-        )
-    )
-    price_col = "fill_price" if "fill_price" in f.columns else (
-        "price" if "price" in f.columns else ""
-    )
+    time_col = "timestamp_utc"
+    price_col = "fill_price"
 
     if not time_col or not price_col:
         out["notes"] = (
