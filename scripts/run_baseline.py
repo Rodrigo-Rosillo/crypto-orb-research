@@ -27,16 +27,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.utils import load_valid_days_csv, parse_hhmm, sha256_file  # noqa: E402
+from core.utils import load_valid_days_csv, parse_hhmm, sha256_file, stable_json  # noqa: E402
 from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
 
 # Futures engine (Phase 2)
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
 from backtester.risk import risk_limits_from_config  # noqa: E402
-
-
-def stable_json(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False, indent=2)
 
 
 def sha256_bytes(b: bytes) -> str:

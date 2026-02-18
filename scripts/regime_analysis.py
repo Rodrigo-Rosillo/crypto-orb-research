@@ -15,17 +15,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.utils import parse_hhmm, sha256_file  # noqa: E402
+from core.utils import parse_hhmm, sha256_file, stable_json  # noqa: E402
 from strategy import add_trend_indicators  # noqa: E402
 
 
 # ---------------------------
 # Utilities
 # ---------------------------
-def stable_json(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-
-
 def ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(df.index, pd.DatetimeIndex):
         raise TypeError("Dataset must have a DatetimeIndex (UTC candle open timestamps).")

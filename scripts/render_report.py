@@ -1,14 +1,15 @@
 from __future__ import annotations
-
+import sys
 import json
 from pathlib import Path
 from html import escape
-
 import pandas as pd
 
-
-def stable_json(obj) -> str:
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+    
+from core.utils import stable_json
 
 
 def load_json(path: Path):

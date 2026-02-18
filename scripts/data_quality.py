@@ -16,11 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.utils import sha256_file  # noqa: E402
-
-
-def stable_json(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+from core.utils import sha256_file, stable_json  # noqa: E402
 
 
 def parse_timeframe_to_minutes(tf: str) -> int:

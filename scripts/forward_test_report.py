@@ -17,14 +17,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from forward.schemas import FILLS_COLUMNS, validate_df_columns  # noqa: E402
+from core.utils import stable_json  # noqa: E402
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def stable_json(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
 def read_json(path: Path) -> Dict[str, Any]:

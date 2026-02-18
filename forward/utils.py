@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
-from core.utils import load_valid_days_csv, parse_hhmm
+from core.utils import load_valid_days_csv, parse_hhmm, stable_json
 
 
 def parse_utc_ts(s: Optional[str]) -> Optional[pd.Timestamp]:
@@ -25,12 +25,6 @@ def ensure_repo_path(repo_root: Path, p: str) -> Path:
     if not out.is_absolute():
         out = (repo_root / out).resolve()
     return out
-
-
-def stable_json(obj: Any) -> str:
-    import json
-
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False, indent=2, default=str)
 
 
 def utc_run_id(now: Optional[datetime] = None) -> str:
