@@ -158,6 +158,20 @@ class RiskManager:
             self.halt_day = day
             self._event(ts, "HALT_DAY", message, reason=reason, day=str(day), **info)
 
+    def emit_event(self, ts: pd.Timestamp, kind: str, message: str, **info: Any) -> None:
+        self._event(ts, kind, message, **info)
+
+    def halt(self, ts: pd.Timestamp, reason: str, message: str, **info: Any) -> None:
+        self._halt_global(ts, reason=reason, message=message, **info)
+
+    def is_halted(self) -> bool:
+        return bool(self.halted_global)
+
+    def pop_events(self) -> List[Dict[str, Any]]:
+        out = list(self.events)
+        self.events = []
+        return out
+
     def can_enter(self, day: Any) -> bool:
         if not self.limits.enabled:
             return True
