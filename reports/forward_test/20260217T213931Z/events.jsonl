@@ -41,3 +41,4 @@
 {"ts": "2026-02-17T22:30:01.074166+00:00", "type": "STOP_DURATION", "duration_minutes": 10}
 {"ts": "2026-02-17T22:30:03.055679+00:00", "type": "CANCEL_ALL_OPEN_ORDERS"}
 {"ts": "2026-02-17T22:30:03.056272+00:00", "type": "LIVE_RUN_END", "bars_processed": 2, "final_equity": "", "reason": "STOP"}
+{"ts": "2026-02-19T21:38:32.905790+00:00", "type": "DB_INIT_OK", "db_path": "reports\\forward_test\\20260217T213931Z\\state.db"}
