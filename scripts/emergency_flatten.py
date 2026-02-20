@@ -9,11 +9,12 @@ import time
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List
 from urllib.parse import urlencode
+from typing import NoReturn
 
 import requests
 
 
-def _fail(message: str) -> "None":
+def _fail(message: str) -> NoReturn:
     raise RuntimeError(message)
 
 
