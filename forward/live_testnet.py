@@ -51,15 +51,12 @@ async def _write_heartbeat_loop(
     """Write a UTC timestamp to heartbeat_path every interval_seconds.
 
     This allows the Docker healthcheck to verify the main loop is alive
-    (healthcheck: find /data/heartbeat -mmin -5 -type f | grep -q .)
+    (healthcheck: find /data/heartbeat -mmin -10 -type f | grep -q .)
     Best-effort: errors are printed to stderr and never propagate.
     """
     while not stop_event.is_set():
         try:
-            heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = heartbeat_path.with_suffix(".tmp")
-            tmp.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
-            os.replace(tmp, heartbeat_path)
+            _write_heartbeat(heartbeat_path)
         except Exception as e:
             print(f"[heartbeat] write failed: {e}", file=sys.stderr)
         try:
@@ -69,6 +66,12 @@ async def _write_heartbeat_loop(
             )
         except asyncio.TimeoutError:
             pass
+
+
+def _write_heartbeat(path: Path) -> None:
+    """Best-effort heartbeat write target for Docker healthchecks."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
 
 
 def _utcnow_iso() -> str:
@@ -617,6 +620,10 @@ async def run_live_testnet(
                 bars_processed += 1
                 state.bars_processed = int(bars_processed)
                 trader_service.persist_state()
+                try:
+                    _write_heartbeat(heartbeat_path)
+                except Exception as e:
+                    print(f"[heartbeat] write failed: {e}", file=sys.stderr)
 
                 if stop_requested:
                     continue

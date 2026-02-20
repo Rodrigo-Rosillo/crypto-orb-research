@@ -11,7 +11,7 @@ services:
         max-size: "10m"
         max-file: "5"
     healthcheck:
-      test: ["CMD-SHELL", "find /data/heartbeat -mmin -5 -type f | grep -q ."]
+      test: ["CMD-SHELL", "find /data/heartbeat -mmin -10 -type f | grep -q ."]
       interval: 5m
       timeout: 10s
       retries: 3
