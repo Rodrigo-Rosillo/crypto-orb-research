@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -40,6 +41,34 @@ from forward.trader_service import (
     _order_status,
     _pos_side_from_amt,
 )
+
+
+async def _write_heartbeat_loop(
+    heartbeat_path: Path,
+    stop_event: asyncio.Event,
+    interval_seconds: int = 60,
+) -> None:
+    """Write a UTC timestamp to heartbeat_path every interval_seconds.
+
+    This allows the Docker healthcheck to verify the main loop is alive
+    (healthcheck: find /data/heartbeat -mmin -5 -type f | grep -q .)
+    Best-effort: errors are printed to stderr and never propagate.
+    """
+    while not stop_event.is_set():
+        try:
+            heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = heartbeat_path.with_suffix(".tmp")
+            tmp.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
+            os.replace(tmp, heartbeat_path)
+        except Exception as e:
+            print(f"[heartbeat] write failed: {e}", file=sys.stderr)
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(stop_event.wait()),
+                timeout=float(interval_seconds),
+            )
+        except asyncio.TimeoutError:
+            pass
 
 
 def _utcnow_iso() -> str:
@@ -137,6 +166,8 @@ async def run_live_testnet(
     db_path = Path(str(db_path_raw))
     if not db_path.is_absolute():
         db_path = run_dir / db_path
+
+    heartbeat_path = Path(os.environ.get("HEARTBEAT_PATH", "/data/heartbeat"))
 
     # Allow the CLI runner to inject an external stop_event (e.g., for graceful
     # Ctrl+C handling). If not provided, create an internal event.
@@ -507,6 +538,9 @@ async def run_live_testnet(
         stop_requested = False
 
         hb = asyncio.create_task(data_service.heartbeat_task(stop_event))
+        hb_writer = asyncio.create_task(
+            _write_heartbeat_loop(heartbeat_path, stop_event)
+        )
 
         try:
             async for bar in data_service.stream_closed(stop_event):
@@ -606,6 +640,14 @@ async def run_live_testnet(
             hb.cancel()
             try:
                 await hb
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
+            hb_writer.cancel()
+            try:
+                await hb_writer
             except asyncio.CancelledError:
                 pass
             except Exception:

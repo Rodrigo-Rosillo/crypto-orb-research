@@ -526,3 +526,14 @@ Acceptance check (Phase 5 / Step 4):
 - forced restart resumes safely:
   - stop the program, then re-run with the same `--run-id` and it should load `state.json` and reconcile
 
+## Docker run (Step 6.4)
+
+```bash
+docker build -t crypto-orb-trader .
+cp .env.example .env   # then fill in secrets
+docker compose up -d
+docker compose logs -f trader
+docker compose down
+# Verify state persisted:
+docker compose run --rm trader ls -la /data
+```

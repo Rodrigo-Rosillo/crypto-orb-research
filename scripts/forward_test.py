@@ -11,6 +11,8 @@ import signal
 import platform
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -79,6 +81,28 @@ def _append_event_jsonl(path: Path, event: dict) -> None:
     except Exception:
         # Never crash the runner because logging failed.
         pass
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Atomically write text plus trailing newline to path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(f"{text}\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _heartbeat_loop(stop_evt: threading.Event, hb_path: Path, interval_s: int) -> None:
+    """Best-effort heartbeat writer for Docker healthchecks."""
+    interval = max(1, int(interval_s))
+    while not stop_evt.is_set():
+        try:
+            _atomic_write_text(hb_path, datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
+        for _ in range(interval):
+            if stop_evt.is_set():
+                break
+            time.sleep(1)
 
 
 async def _run_with_graceful_sigint(coro: asyncio.Future, stop_event: asyncio.Event):
@@ -563,5 +587,21 @@ def main() -> int:
         return 0
 
 
+def _main_with_heartbeat() -> int:
+    hb_path = Path(os.environ.get("HEARTBEAT_PATH", "/data/heartbeat"))
+    stop_evt = threading.Event()
+    t = threading.Thread(
+        target=_heartbeat_loop,
+        args=(stop_evt, hb_path, 60),
+        daemon=True,
+    )
+    t.start()
+    try:
+        return main()
+    finally:
+        stop_evt.set()
+        t.join(timeout=2)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_main_with_heartbeat())

@@ -8,3 +8,9 @@ reports/scenarios/spot/
 reports/walk_forward_tune/folds/
 reports/robustness/scenarios/
 reports/walk_forward_regime_filter/folds/
+.env
+.env.*
+/data/
+*.db
+*.db-wal
+*.db-shm
