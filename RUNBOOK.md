@@ -330,3 +330,176 @@ Log rotation install:
 ```bash
 sudo cp ops/logrotate-watchdog.conf /etc/logrotate.d/watchdog
 ```
+
+## Threat Model
+
+| Scenario | Existing Mitigation | Response |
+| --- | --- | --- |
+| 1. API Key Leak | IP-restricted API key, host-only `.env`, least-privilege key settings | Disable key, flatten exposure, rotate key, redeploy |
+| 2. Runaway Orders | Reject-count kill switch and single-open-position enforcement | Stop bot, flatten, inspect run artifacts before restart |
+| 3. Lightsail Instance Reboot | `restart: unless-stopped`, watchdog cron, SQLite WAL consistency | Verify container/heartbeat and auto-enable instance behavior |
+| 4. SQLite File Corrupted | Startup integrity checks and transactional state writes | Stop bot, inspect DB integrity, restore backup, restart |
+| 5. WebSocket Drops / Reconnect Fails Repeatedly | Exponential backoff, heartbeat updates, data-stale kill switch, watchdog alerting | Confirm stale event/status, restart after connectivity is healthy |
+| 6. Unexpected Open Position on Startup | Startup reconciliation vs exchange position, mismatch halt, optional auto-flatten | Reconcile manually, verify state alignment, restart |
+| 7. Binance System Outage | Data-stale kill switch; halts trading without fresh data | Wait for recovery, verify TP/SL state, then restart |
+| 8. Large Unexpected Loss | Partial guards (reject/margin kill switches), alerting; drawdown breaker deferred | Stop bot, assess position risk, perform postmortem before resume |
+
+### 1. API Key Leak
+(committed to git, exposed in logs, environment, etc.)
+
+Mitigation:
+- API key is IP-restricted to Lightsail static IP in Binance console.
+- Key is stored in host-only `.env` (`chmod 600`, not committed).
+- Key has Read + Trade only; withdrawals disabled.
+- Secret scanning in CI: DEFERRED to Phase 7.
+
+Response:
+1. Disable compromised key in Binance console immediately.
+2. Close open positions manually via Binance UI or `emergency_flatten.py`.
+3. Audit what was exposed and how.
+4. Generate new key (Read + Trade only, IP-restricted, withdrawals disabled).
+5. Update host `.env`, redeploy: `docker compose up -d --build`.
+
+Status: PARTIAL (secret scanning deferred to Phase 7 CI setup)
+
+### 2. Runaway Orders (bug causes repeated order placement)
+
+Mitigation:
+- `max_order_rejects_per_day` kill switch halts trading after N consecutive
+  order rejects (default 3). Fires `KILL_SWITCH_ORDER_REJECTS` event and stops
+  the main loop.
+- One open position at a time enforced: bot will not place a new entry if
+  `state.open_position` is not `None`.
+
+Response:
+1. `docker compose stop trader`
+2. Run `emergency_flatten.py` to close any open position.
+3. Inspect `events.jsonl` and `orders.csv` in the run directory to determine
+   root cause before restarting.
+
+Note: A max daily order count limit (separate from reject count) is not yet
+implemented. The reject kill switch is the primary guard.
+
+Status: PARTIAL
+
+### 3. Lightsail Instance Reboot
+
+Mitigation:
+- `restart: unless-stopped` in `docker-compose.yml` causes Docker to restart
+  the trader container automatically after host reboot.
+- Watchdog cron (root crontab) resumes automatically on host reboot.
+- SQLite WAL mode ensures state is consistent after unclean shutdown.
+
+Response:
+1. Confirm container restarted: `docker compose ps`
+2. Confirm heartbeat is fresh: `docker compose exec trader cat /data/heartbeat`
+3. Watchdog will send a Telegram alert when heartbeat recovers.
+
+Operator action: Ensure "Auto-enable instance" is active in the Lightsail
+console so the instance itself restarts after an AWS host failure.
+
+Status: ACTIVE
+
+### 4. SQLite File Corrupted
+
+Mitigation:
+- SQLite WAL mode with `synchronous=NORMAL` and `PRAGMA integrity_check` on
+  every startup. Bot halts if integrity check fails rather than operating on
+  a corrupt state.
+- WAL atomic writes: `save_state()` uses explicit `BEGIN/COMMIT` covering both
+  `runner_state` and `open_positions` in a single transaction.
+
+Response:
+See "Suspected SQLite corruption" under Emergency Procedures. Summary:
+1. `docker compose stop trader`
+2. Resolve `DATA_DIR` via `docker inspect`.
+3. Run `PRAGMA integrity_check;` via `sqlite3`.
+4. If not `ok`: move aside `state.db` + WAL sidecars, restore from backup.
+5. `docker compose up -d`
+
+Status: ACTIVE
+
+### 5. WebSocket Drops / Reconnect Fails Repeatedly
+
+Mitigation:
+- `BinanceLiveKlineSource` implements exponential backoff reconnect
+  (`max_backoff_seconds` configurable).
+- Heartbeat background task writes `/data/heartbeat` every 60 seconds.
+- Data staleness kill switch in `DataService.heartbeat_task`: if no bar
+  arrives within `max_data_gap_bars * bar_seconds` seconds, fires
+  `KILL_SWITCH_DATA_STALE` and sets `stop_event`.
+- Watchdog detects stale heartbeat (>10 min) and sends Telegram alert.
+
+Response:
+1. Watchdog Telegram alert will fire within 10–15 minutes of stale heartbeat.
+2. Check `events.jsonl` for `KILL_SWITCH_DATA_STALE` entries.
+3. Check Binance System Status page for exchange-side WebSocket issues.
+4. Restart bot when connectivity is confirmed: `docker compose restart trader`
+
+Status: ACTIVE
+
+### 6. Unexpected Open Position on Startup
+(local state says flat, exchange has an open position — or vice versa)
+
+Mitigation:
+- Startup reconciliation block in `run_live_testnet()` fetches
+  `/fapi/v2/positionRisk` and compares to `state.open_position`.
+- On any mismatch, bot emits `RECON_MISMATCH` event and halts (returns 0)
+  before entering the main trading loop.
+- `flatten_on_mismatch` config option (default: false) controls whether the
+  bot auto-flattens the exchange position on mismatch.
+
+Response:
+1. Check `events.jsonl` for `RECON_MISMATCH` event and its payload.
+2. Manually reconcile: close the unexpected position via Binance UI or
+   `emergency_flatten.py` if needed.
+3. Confirm `state.open_position` in `state.json` matches reality.
+4. Restart bot: `docker compose up -d`
+
+`flatten_on_mismatch` setting: review `config_forward_test.yaml` and make a
+conscious choice. Default (`false`) is recommended — auto-flatten can hide bugs.
+
+Status: ACTIVE
+
+### 7. Binance System Outage
+
+Mitigation:
+- Data staleness kill switch fires when no bars arrive within the gap
+  threshold (same as scenario 5).
+- Bot halts gracefully; does not attempt to place orders without data.
+- Open position may remain unhedged during the outage (TP/SL orders
+  were placed on Binance at entry; those remain on exchange if exchange
+  is partially functional).
+
+Response:
+1. Check Binance System Status page.
+2. Do NOT restart the bot during the outage — it will halt again immediately.
+3. When exchange recovers: if position is open, verify TP/SL orders are
+   still active in Binance UI before restarting the bot.
+4. If TP/SL orders were cancelled during the outage: use `emergency_flatten.py`
+   or manually manage the position before restarting.
+5. Restart: `docker compose up -d`
+
+Status: ACTIVE
+
+### 8. Large Unexpected Loss
+
+Mitigation:
+- `daily_loss_halted` and `drawdown_halted` fields exist in the SQLite
+  schema (`runner_state` table) but the drawdown circuit breaker logic is
+  NOT YET WIRED to trading decisions. These are stubs reserved for a
+  future phase.
+- Current guards: order reject kill switch, margin ratio kill switch
+  (`KILL_SWITCH_MARGIN_RATIO` fires if `maint_margin/balance >= threshold`).
+- Watchdog sends ENTRY/EXIT/REJECT Telegram alerts on every trade.
+
+Response:
+1. `docker compose stop trader`
+2. If position is open: assess whether to hold or flatten via `emergency_flatten.py`.
+3. Do not attempt to recover losses by resuming trading immediately.
+4. Conduct a postmortem: review `trade_log`, `events.jsonl`, `signals.csv`.
+5. Identify root cause before resuming. Resume only after understanding
+   why the circuit breaker did not prevent the loss.
+
+Status: PARTIAL — drawdown circuit breaker deferred to future phase.
+
