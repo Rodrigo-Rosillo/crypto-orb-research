@@ -15,7 +15,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
+import shutil
 
 DEFAULT_STATE = {
     "stale_since": None,
@@ -125,18 +125,37 @@ def first_non_empty_line(text: str) -> str | None:
 def get_container_id(
     compose_dir: Path, compose_file: str, service_name: str
 ) -> tuple[str | None, list[str] | None]:
+    # Prefer docker compose (v2). Use -a so stopped containers are included.
     commands = [
-        ["docker", "compose", "-f", compose_file, "ps", "-q", service_name],
-        ["docker-compose", "-f", compose_file, "ps", "-q", service_name],
+        ["docker", "compose", "-f", compose_file, "ps", "-a", "-q", service_name],
+        ["docker", "compose", "-f", compose_file, "ps", "-q", service_name],  # fallback
+        ["docker-compose", "-f", compose_file, "ps", "-a", "-q", service_name],
+        ["docker-compose", "-f", compose_file, "ps", "-q", service_name],     # fallback
     ]
+
     for cmd in commands:
+        # If docker-compose isn't installed, skip it quietly to avoid rc=127 spam.
+        if cmd[0] == "docker-compose" and shutil.which("docker-compose") is None:
+            continue
+
         proc = run_command(cmd, cwd=compose_dir)
+
         if proc.returncode == 0:
             container_id = first_non_empty_line(proc.stdout)
             if container_id:
+                # Return an identifier describing which compose flavor worked.
                 return container_id, cmd[:2] if cmd[0] == "docker" else [cmd[0]]
+
+            # rc=0 but empty output: not a failure, just "no container found" for this command
+            continue
+
         stderr = (proc.stderr or "").strip()
         print(f"WARNING: Command failed: {' '.join(cmd)} (rc={proc.returncode}) {stderr}")
+
+    print(
+        f"WARNING: Could not resolve container ID for service '{service_name}' "
+        f"using compose_file='{compose_file}' in '{compose_dir}'."
+    )
     return None, None
 
 
