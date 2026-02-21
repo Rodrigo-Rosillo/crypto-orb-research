@@ -537,3 +537,158 @@ docker compose down
 # Verify state persisted:
 docker compose run --rm trader ls -la /data
 ```
+
+### Phase 6 — Host-side watchdog (Telegram alerts + optional restart)
+
+This repo includes a **host-side watchdog** that monitors the running `trader` container and the `/data` volume heartbeat, and sends **Telegram alerts** on incident transitions (stale → recovered). It is designed to be **non-spammy**.
+
+#### What it monitors
+
+* Resolves the container via `docker compose` for service `WATCHDOG_SERVICE_NAME` (default: `trader`)
+* Resolves the host `/data` directory by inspecting the container’s `/data` mount
+* Reads:
+
+  * `/data/heartbeat` (freshness)
+  * `/data/state.db` (optional, for trade_log-based checks if enabled in your watchdog)
+
+#### Why it’s often silent
+
+The watchdog is intentionally **stateful** and alerts only on **transitions**:
+
+* **healthy → stale**: sends **one** “Heartbeat stale…” alert and sets `stale_since`
+* **stale → healthy**: sends **one** “Heartbeat recovered…” alert and clears `stale_since`
+* If it stays stale or stays healthy: **no repeated alerts** (silent is expected)
+
+This is why you may see **no stdout output** and still get exit code `0`.
+
+#### Files and paths (host)
+
+* Env file (root-only): `/etc/watchdog.env`
+* Wrapper: `/usr/local/bin/run_watchdog.sh`
+* Script: `/home/ubuntu/watchdog.py`
+* Default state file: `/home/ubuntu/.watchdog_state.json`
+
+  * You can override with `WATCHDOG_STATE_PATH=/tmp/...` for testing.
+
+#### Example `/etc/watchdog.env`
+
+Keep secrets here, plus compose directory:
+
+* `TELEGRAM_BOT_TOKEN="..."`
+* `TELEGRAM_CHAT_ID="..."`
+* `WATCHDOG_COMPOSE_DIR="/home/ubuntu/crypto-orb-research"`
+
+Optional knobs (can live here, but note overrides below):
+
+* `WATCHDOG_HEARTBEAT_STALE_SECONDS="600"`
+* `WATCHDOG_RESTART_ON_STALE="1"`
+* `WATCHDOG_RESTART_GRACE_SECONDS="300"`
+* `WATCHDOG_SERVICE_NAME="trader"`
+* `WATCHDOG_COMPOSE_FILE="docker-compose.yml"`
+
+#### Wrapper behavior (important for overrides)
+
+`run_watchdog.sh` sources `/etc/watchdog.env`. If you set `WATCHDOG_HEARTBEAT_STALE_SECONDS` in that file, then a command like:
+
+`WATCHDOG_HEARTBEAT_STALE_SECONDS=5 /usr/local/bin/run_watchdog.sh`
+
+may be overwritten by the env file (depending on how/when it’s sourced). For one-off testing, prefer the “source then export overrides” pattern below.
+
+---
+
+### Testing alerts (recommended)
+
+#### 1) Confirm it runs (may be quiet)
+
+```bash
+sudo /usr/local/bin/run_watchdog.sh --dry-run; echo "exit_code=$?"
+```
+
+Exit code `0` with no output is normal when healthy/no transition.
+
+#### 2) Force a *stale* alert safely (fresh state file test)
+
+This forces a clean transition by using a new state file. Works even if your normal state is already “stale” or “healthy”.
+
+```bash
+cd /home/ubuntu/crypto-orb-research
+sudo docker compose stop trader
+sleep 20
+
+STATE="/tmp/watchdog_stoptest_$(date -u +%s).json"
+sudo bash -lc "
+set -a; source /etc/watchdog.env; set +a
+export WATCHDOG_STATE_PATH='$STATE'
+export WATCHDOG_HEARTBEAT_STALE_SECONDS=5
+export WATCHDOG_RESTART_ON_STALE=0
+cd /home/ubuntu/crypto-orb-research
+/usr/bin/python3 /home/ubuntu/watchdog.py
+"
+```
+
+Expected: one Telegram “Heartbeat stale…” alert.
+
+#### 3) Force a *recovery* alert
+
+```bash
+cd /home/ubuntu/crypto-orb-research
+sudo docker compose start trader
+sleep 30
+
+sudo bash -lc "
+set -a; source /etc/watchdog.env; set +a
+export WATCHDOG_STATE_PATH='$STATE'
+export WATCHDOG_HEARTBEAT_STALE_SECONDS=5
+export WATCHDOG_RESTART_ON_STALE=0
+cd /home/ubuntu/crypto-orb-research
+/usr/bin/python3 /home/ubuntu/watchdog.py
+"
+```
+
+Expected: one Telegram “Heartbeat recovered…” alert (may take a few tries if the app takes time to write the first heartbeat after startup).
+
+#### Avoid flapping in production
+
+Do **not** use tiny stale thresholds like `5s` outside testing. Set `WATCHDOG_HEARTBEAT_STALE_SECONDS` comfortably above the normal heartbeat interval (common values: `120–600` seconds).
+
+---
+
+### Cron installation and setup (Ubuntu)
+
+#### Install cron
+
+```bash
+sudo apt-get update
+sudo apt-get install -y cron
+sudo systemctl enable --now cron
+```
+
+#### Cron entry (recommended: `/etc/cron.d/crypto_orb_watchdog`)
+
+```bash
+sudo tee /etc/cron.d/crypto_orb_watchdog >/dev/null <<'EOF'
+*/5 * * * * root /usr/local/bin/run_watchdog.sh >> /var/log/watchdog.log 2>&1
+EOF
+sudo chmod 644 /etc/cron.d/crypto_orb_watchdog
+sudo systemctl restart cron
+```
+
+#### Verify cron is running
+
+```bash
+sudo journalctl -u cron --no-pager -n 50
+sudo tail -n 200 /var/log/watchdog.log
+```
+
+**Note:** `watchdog.log` can be empty when everything is healthy.
+
+#### Prevent duplicate cron jobs
+
+Make sure you **do not** also have a root crontab entry running watchdog directly (this can cause confusing logs / wrong working directory):
+
+```bash
+sudo crontab -l
+```
+
+If you see a watchdog line there, remove it and rely on `/etc/cron.d/crypto_orb_watchdog`.
+
