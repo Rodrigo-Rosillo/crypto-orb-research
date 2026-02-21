@@ -12,4 +12,4 @@ RUN mkdir -p /data
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-CMD ["python", "scripts/forward_test.py", "--config", "config_forward_test.yaml", "--source", "live"]
+CMD ["python", "scripts/forward_test.py", "--config", "config_forward_test.yaml", "--source", "live","--mode","testnet"]
