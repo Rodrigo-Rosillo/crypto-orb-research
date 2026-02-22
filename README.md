@@ -1,6 +1,6 @@
 # crypto-orb-research
 
-Research repo for an Opening Range Breakout (ORB) strategy on **SOLUSDT 30m** Binance data (UTC), with **reproducible** backtests, **spot + isolated-margin futures** execution models, and Phase-3 robustness (walk-forward, bootstraps, benchmarks, regime diagnostics).
+Research and deployment repo for an Opening Range Breakout (ORB) strategy on **SOLUSDT 30m** Binance USD-M Futures (UTC). Covers the full pipeline from reproducible backtests through production deployment: data quality, spot + isolated-margin futures execution models, Phase-3 robustness (walk-forward, bootstraps, benchmarks, regime diagnostics), live shadow and testnet trading, Dockerized production deployment on AWS Lightsail, and a CI-gated test suite (unit, property-based, integration, and replay regression).
 
 > **Educational/research only.** Nothing here is financial advice. If you ever run this live, start with paper/shadow mode and strict risk limits.
 
@@ -11,10 +11,12 @@ Research repo for an Opening Range Breakout (ORB) strategy on **SOLUSDT 30m** Bi
 **It is:**
 - A “research artifact” where rerunning scripts produces auditable outputs (JSON/CSV/HTML) under `reports/`.
 - A pipeline from **raw CSV** → **data quality checks** → **processed parquet + valid-day list** → **baseline backtest** → **stress/robustness/walk-forward**.
+- A **Dockerized production deployment** (Phase 6), with SQLite WAL state, a host-side watchdog, Telegram alerting, and a RUNBOOK + threat model.
+- A **CI-gated test suite** (Phase 7): unit tests, property-based tests (Hypothesis), replay regression, and state-recovery integration tests running on every push.
 
 **It is not:**
-- A production trading bot (Phase 4 covers that separately).
-- A framework for multiple assets/timeframes (it’s currently configured for SOLUSDT 30m).
+- A framework for multiple assets/timeframes (currently configured for SOLUSDT 30m only).
+- Financially advised. Run shadow/testnet mode before any real money.
 
 ---
 
@@ -36,11 +38,17 @@ Research repo for an Opening Range Breakout (ORB) strategy on **SOLUSDT 30m** Bi
 - `config.yaml` — single source of truth for strategy params (symbol/timeframe/ORB/ADX/fees/risk).
 - `strategy.py` — pure signal logic and indicator computation.
 - `backtester/futures_engine.py` — isolated-margin futures simulator (fees/slippage/delay/funding/liquidation approx).
-- `scripts/spot_engine.py` — spot execution simulator (fees/slippage/delay).
+- `forward/` — live pipeline: data service, trader service, risk engine, stream engine, SQLite state store.
 - `scripts/*.py` — runnable research scripts that write artifacts.
+- `ops/watchdog.py` — host-side cron watchdog (heartbeat + Telegram alerts + optional restart).
+- `scripts/emergency_flatten.py` — standalone emergency position flattener (works without main container).
+- `tests/unit/` — unit tests (indicators, signals, fees/funding, SQLite state, risk controls, property-based).
+- `tests/integration/` — replay regression + state-recovery integration tests.
+- `.github/workflows/ci.yml` — CI pipeline (lint, type-check, unit tests, replay regression, Docker build, secret scan).
 - `data/manifest.json` — describes **raw CSV dataset** location + per-file hashes.
 - `data/processed/` — parquet dataset + valid/invalid day lists + processed manifest.
 - `reports/` — outputs (baseline, scenarios, walk-forward, robustness, etc.).
+- `RUNBOOK.md` — operational runbook (start/stop, emergency procedures, backup, threat model).
 
 ---
 
@@ -60,6 +68,13 @@ pip install -r requirements.txt
 ```
 
 > `pyarrow` is required for parquet. It’s already listed in `requirements.txt`.
+
+### 3) Install dev / test dependencies (optional, for running tests locally)
+```bash
+pip install -r requirements-dev.txt
+```
+
+Includes: `pytest`, `pytest-cov`, `hypothesis`, `ruff`, `mypy`.
 
 ---
 
@@ -530,7 +545,7 @@ Acceptance check (Phase 5 / Step 4):
 
 ```bash
 docker build -t crypto-orb-trader .
-cp .env.example .env   # then fill in secrets
+# Create .env from RUNBOOK template, then fill in secrets (never commit this file)
 docker compose up -d
 docker compose logs -f trader
 docker compose down
@@ -692,3 +707,62 @@ sudo crontab -l
 
 If you see a watchdog line there, remove it and rely on `/etc/cron.d/crypto_orb_watchdog`.
 
+---
+
+## Phase 7 — Testing & CI
+
+Phase 7 adds a CI-gated test suite covering the most failure-prone logic in the pipeline. All tests run on every push to `main` and every pull request via GitHub Actions.
+
+### Running tests locally
+
+```bash
+# Install dev dependencies first
+pip install -r requirements-dev.txt
+
+# Unit tests only (fast, no network, no data files required)
+pytest tests/unit -v
+
+# Replay regression (requires data/processed/SOLUSDT_30m.parquet)
+pytest tests/integration/test_replay.py -v
+
+# State recovery integration tests (POSIX only for SIGKILL test)
+pytest tests/integration/test_state_recovery.py -v
+
+# All tests with coverage report
+pytest tests/ -v --cov=core --cov=forward --cov=backtester --cov=strategy --cov-report=term-missing
+```
+
+If `data/processed/SOLUSDT_30m.parquet` is not present, the replay regression test skips automatically with a clear message. Run `python scripts/build_parquet.py` to generate it.
+
+### What is tested
+
+**Unit tests** (`tests/unit/`):
+- `test_indicators.py` — ADX flat-market stability, trend-direction sanity, ORB boundary detection
+- `test_signals.py` — post-cutoff rule, one-signal-per-day lock, partial-condition non-firing
+- `test_fees_funding.py` — deterministic round-trip fee + funding math against manual formula
+- `test_state_store_sqlite.py` — WAL crash-safety: write → crash-close → reopen → exact equality
+- `test_risk_controls.py` — daily loss halt, drawdown halt, consecutive-loss reset on UTC day boundary
+- `test_forward_risk_engine.py` — kill-switch boundary semantics (`>` vs `>=` for each check)
+- `test_properties_futures.py` — Hypothesis properties: position size cap, accounting identity, no-lookahead entries
+- `test_properties_risk.py` — Hypothesis properties: consecutive-loss day semantics, kill-switch latch
+
+**Integration tests** (`tests/integration/`):
+- `test_replay.py` — replay regression: batch backtest path == streaming shadow-engine path (trade count, entry/exit timestamps, per-trade PnL, final equity)
+- `test_state_recovery.py` — partial fill handling, rejection counter, reconnect dedupe, SIGKILL restart without re-entry (POSIX only)
+
+### CI pipeline (`.github/workflows/ci.yml`)
+
+Runs on every push to `main` and every pull request. All steps except coverage threshold are **blocking**.
+
+| Step | Command | Blocks? |
+|---|---|---|
+| Lint | `ruff check .` | Yes |
+| Type check | `mypy core forward --strict ...` | Yes |
+| Unit tests | `pytest tests/unit` | Yes |
+| Coverage threshold | `coverage report --fail-under=80` | Warning only |
+| Replay regression | `pytest tests/integration/test_replay.py` | Yes |
+| State recovery | `pytest tests/integration/test_state_recovery.py` | Yes |
+| Docker build | `docker build --no-cache .` | Yes |
+| Secret scan | `gitleaks` | Yes |
+
+> The replay regression test skips in CI if the parquet data file is not present (it is not committed to the repo). This is expected — the test is meaningful locally and in environments where the data pipeline has been run.
