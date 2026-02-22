@@ -14,3 +14,4 @@ reports/walk_forward_regime_filter/folds/
 *.db
 *.db-wal
 *.db-shm
+.hypothesis/
