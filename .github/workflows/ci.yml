@@ -60,6 +60,9 @@ jobs:
       - name: Replay regression
         run: pytest tests/integration/test_replay.py -v
 
+      - name: Integration tests (state recovery)
+        run: python -m pytest tests/integration/test_state_recovery.py -v
+
       - name: Docker build
         run: docker build --no-cache .
 
