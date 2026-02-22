@@ -176,6 +176,7 @@ def build_orders_fills_positions(
 
 # Orders derived from signals (scheduled at signal time; filled only if a trade exists)
     for ts, row in sig_rows.iterrows():
+        #sig_date = row["date"]
         sig_type = str(row.get("signal_type", ""))
         signal = int(row.get("signal", 0))
         side = "LONG" if signal > 0 else "SHORT"
