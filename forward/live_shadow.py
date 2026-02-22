@@ -215,7 +215,6 @@ async def run_live_shadow(
                     ],
                 )
                 stop_event.set()
-                stop_requested = True
                 continue
 
     src = BinanceLiveKlineSource(

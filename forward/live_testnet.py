@@ -18,10 +18,8 @@ from forward.binance_live import (
 )
 from forward.data_service import DataService
 from forward.shadow import build_signals
-from forward.schemas import FILLS_COLUMNS, ORDERS_COLUMNS, POSITIONS_COLUMNS, SIGNALS_COLUMNS, validate_df_columns
+from forward.schemas import FILLS_COLUMNS, ORDERS_COLUMNS, SIGNALS_COLUMNS, validate_df_columns
 from forward.state_store_sqlite import (
-    OpenPositionState,
-    RunnerState,
     SQLiteStateStore,
     migrate_state_json_to_sqlite,
 )
@@ -35,11 +33,7 @@ from forward.testnet_broker import (
 from forward.trader_service import (
     TraderService,
     _extract_order_id,
-    _float,
     _order_avg_price,
-    _order_exec_qty,
-    _order_status,
-    _pos_side_from_amt,
 )
 
 

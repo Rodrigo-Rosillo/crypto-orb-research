@@ -5,7 +5,6 @@ os.environ["PYTHONHASHSEED"] = "0"
 
 import argparse
 import hashlib
-import json
 import platform
 import random
 import subprocess

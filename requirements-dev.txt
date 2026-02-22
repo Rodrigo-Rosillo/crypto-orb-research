@@ -1,3 +1,7 @@
+ruff
+mypy
+types-requests
+types-PyYAML
 pytest>=8.0
 pytest-cov>=5.0
 hypothesis>=6.0

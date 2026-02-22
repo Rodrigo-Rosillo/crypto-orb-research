@@ -19,7 +19,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Tuple
 
 import pandas as pd
 

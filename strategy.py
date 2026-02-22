@@ -170,7 +170,7 @@ def generate_orb_signals(
         if after_orb.empty:
             continue
 
-        orb_high = orb_ranges.loc[day, "orb_high"]
+        #orb_high = orb_ranges.loc[day, "orb_high"]
         orb_low = orb_ranges.loc[day, "orb_low"]
 
         for idx in after_orb.index:

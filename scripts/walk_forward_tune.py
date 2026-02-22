@@ -5,14 +5,13 @@ os.environ["PYTHONHASHSEED"] = "0"
 
 import argparse
 import hashlib
-import json
 import platform
 import random
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone, time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -362,8 +361,8 @@ def main() -> int:
     position_size = float(cfg["risk"]["position_size"])
     taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
 
-    # Phase 4 risk controls
-    risk_limits = risk_limits_from_config(cfg)
+    # Phase 4 risk controls (parsed here for consistency with run config).
+    _ = risk_limits_from_config(cfg)
 
     # Load parquet
     data_path = Path(args.data) if args.data else Path(f"data/processed/{symbol}_{timeframe}.parquet")

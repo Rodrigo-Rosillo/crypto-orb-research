@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Type check
+        run: |
+          mypy core forward \
+            --strict \
+            --disable-error-code=no-untyped-def \
+            --disable-error-code=no-untyped-call \
+            --disable-error-code=type-arg \
+            --disable-error-code=no-any-return \
+            --disable-error-code=assignment \
+            --disable-error-code=attr-defined \
+            --disable-error-code=arg-type \
+            --ignore-missing-imports
+
+      - name: Unit tests with coverage
+        run: |
+          pytest tests/unit -v \
+            --cov=core \
+            --cov=forward \
+            --cov=backtester \
+            --cov=strategy \
+            --cov-report=term-missing
+
+      - name: Coverage threshold (warning only)
+        continue-on-error: true
+        run: coverage report --fail-under=80
+
+      - name: Replay regression
+        run: pytest tests/integration/test_replay.py -v
+
+      - name: Docker build
+        run: docker build --no-cache .
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

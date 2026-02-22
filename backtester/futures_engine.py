@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from .futures_core import FuturesExecutionCore, _is_funding_bar, _liq_price, _slip_price
+from .futures_core import FuturesExecutionCore
 from .risk import RiskLimits, expected_bar_seconds_from_index
 
 
