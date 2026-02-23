@@ -7,11 +7,12 @@ import hmac
 import os
 import time
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, NoReturn
 from urllib.parse import urlencode
-from typing import NoReturn
 
 import requests
+from forward.state_store_sqlite import SQLiteStateStore
 
 
 def _fail(message: str) -> NoReturn:
@@ -178,11 +179,38 @@ def _open_positions(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _state_db_path() -> Path:
+    raw = (os.getenv("STATE_DB_PATH") or "").strip()
+    if raw:
+        return Path(raw)
+    return Path("/data/state.db")
+
+
+def _clear_open_position_state(db_path: Path) -> None:
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        state.open_position = None
+        store.save_state(state)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Emergency flatten for Binance USD-M Futures (close all open positions at market)."
     )
     parser.add_argument("--testnet", action="store_true", help="Use Binance USD-M demo/testnet.")
+    parser.add_argument(
+        "--clear-state",
+        dest="clear_state",
+        action="store_true",
+        help="Clear persisted SQLite open_position state after exchange is confirmed flat.",
+    )
+    parser.add_argument(
+        "--no-clear-state",
+        dest="clear_state",
+        action="store_false",
+        help="Do not clear persisted SQLite open_position state.",
+    )
+    parser.set_defaults(clear_state=True)
     args = parser.parse_args()
 
     api_key, api_secret = _get_credentials(args.testnet)
@@ -193,15 +221,31 @@ def main() -> int:
         recv_window_ms=_get_recv_window_ms(),
     )
 
-    positions = client.get_positions()
-    open_rows = _open_positions(positions)
+    open_rows = _open_positions(client.get_positions())
 
     if not open_rows:
         print("No open positions.")
+    else:
+        for row in list(open_rows):
+            client.close_position(row)
+
+    final_open_rows = _open_positions(client.get_positions())
+    if final_open_rows:
+        print("STATE CLEAR SKIPPED (exchange not flat)")
+        print("WARNING: Exchange still reports open positions; refusing to clear persisted state.")
+        return 1
+
+    if not args.clear_state:
+        print("STATE CLEAR SKIPPED (--no-clear-state)")
         return 0
 
-    for row in open_rows:
-        client.close_position(row)
+    db_path = _state_db_path()
+    try:
+        _clear_open_position_state(db_path)
+    except Exception as exc:
+        print(f"STATE CLEAR FAILED in {db_path}: {exc}")
+    else:
+        print(f"STATE CLEARED in {db_path}")
 
     return 0
 
