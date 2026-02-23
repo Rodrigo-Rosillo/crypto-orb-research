@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import hmac
 import os
+import sys
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -12,6 +13,11 @@ from typing import Any, Dict, Iterable, List, NoReturn
 from urllib.parse import urlencode
 
 import requests
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from forward.state_store_sqlite import SQLiteStateStore
 
 
