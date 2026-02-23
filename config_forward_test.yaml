@@ -68,7 +68,7 @@ forward_test:
     end: null
 
   # Output root (a run_id folder will be created under this)
-  out_dir: reports/forward_test
+  out_dir: /data/reports/forward_test
 
   # How many recent bars to keep for indicator context
   bar_lookback: 1000
