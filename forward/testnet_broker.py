@@ -349,9 +349,9 @@ class BinanceFuturesTestnetBroker:
             if val is None:
                 val = min_notional_raw.get("minNotional")
             if val is not None:
-                parsed = _safe_decimal(val, Decimal("0"))
-                if parsed > 0:
-                    min_notional = parsed
+                notional_val = _safe_decimal(val, Decimal("0"))
+                if notional_val > 0:
+                    min_notional = notional_val
                     min_notional_filter_type = "MIN_NOTIONAL"
         if min_notional is None:
             notional_raw = by_type.get("NOTIONAL")
@@ -360,9 +360,9 @@ class BinanceFuturesTestnetBroker:
                 if val is None:
                     val = notional_raw.get("notional")
                 if val is not None:
-                    parsed = _safe_decimal(val, Decimal("0"))
-                    if parsed > 0:
-                        min_notional = parsed
+                    notional_val = _safe_decimal(val, Decimal("0"))
+                    if notional_val > 0:
+                        min_notional = notional_val
                         min_notional_filter_type = "NOTIONAL"
 
         if lot.step_size <= 0 or mlot.step_size <= 0 or price_filter.tick_size <= 0:
