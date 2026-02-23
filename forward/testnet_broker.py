@@ -376,7 +376,7 @@ class BinanceFuturesTestnetBroker:
                 },
             )
 
-        parsed = _SymbolFilters(
+        parsed: _SymbolFilters = _SymbolFilters(
             symbol=symbol_u,
             lot_size=lot,
             market_lot_size=mlot,
