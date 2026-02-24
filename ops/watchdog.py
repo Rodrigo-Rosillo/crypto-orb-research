@@ -390,6 +390,7 @@ def main() -> int:
         if dry_run:
             print(f"DRY-RUN: Would send Telegram alert: {text}")
             return
+        print(f"ALERT: {text}")
         send_telegram(bot_token=bot_token, chat_id=chat_id, text=text)
 
     container_id: str | None = None
