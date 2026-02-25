@@ -133,6 +133,8 @@ async def run_live_testnet(
 
     testnet_cfg = ft_cfg.get("testnet") if isinstance(ft_cfg.get("testnet"), dict) else {}
     base_url = str((testnet_cfg or {}).get("base_url", "https://demo-fapi.binance.com"))
+    if not base_url.lower().startswith("https://"): 
+        raise ValueError("forward_test.testnet.base_url must start with https://")
     recv_window_ms = int((testnet_cfg or {}).get("recv_window_ms", 5000))
     poll_interval_seconds = float((testnet_cfg or {}).get("poll_interval_seconds", 2.0))
     cancel_open_orders_on_exit = bool((testnet_cfg or {}).get("cancel_open_orders_on_exit", True))

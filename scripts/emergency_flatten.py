@@ -155,6 +155,8 @@ def _get_credentials(use_testnet: bool) -> tuple[str, str]:
 
 def _select_base_url(use_testnet: bool) -> str:
     override = (os.getenv("BINANCE_FAPI_BASE_URL") or "").strip()
+    if override and not override.lower().startswith("https://"): 
+        _fail("BINANCE_FAPI_BASE_URL must start with https://")
     if override:
         return override
     if use_testnet:

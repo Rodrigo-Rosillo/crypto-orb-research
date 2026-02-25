@@ -164,6 +164,8 @@ class BinanceFuturesTestnetBroker:
             )
 
         self.cfg = cfg or TestnetConfig()
+        if not str(self.cfg.base_url).lower().startswith("https://"): 
+            raise ValueError("TestnetConfig.base_url must start with https://")
         self.session = requests.Session()
         self.session.headers.update({"X-MBX-APIKEY": self.api_key})
         self._exchange_info_cache: Optional[dict[str, Any]] = None
