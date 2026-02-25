@@ -59,6 +59,7 @@ class BinanceClient:
         self.api_secret = api_secret
         self.recv_window_ms = int(recv_window_ms)
         self.session = requests.Session()
+        self.session.trust_env = False
         self.session.headers.update({"X-MBX-APIKEY": self.api_key})
 
     def signed_request(self, method: str, path: str, params: Dict[str, Any] | None = None) -> Any:
