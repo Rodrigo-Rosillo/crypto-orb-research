@@ -3,8 +3,17 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Explicit paths ensure all writes land in the persisted volume,
+      # and emergency_flatten.py resolves the same db without extra flags.
+      - STATE_DB_PATH=/data/state.db
+      - HEARTBEAT_PATH=/data/heartbeat
     volumes:
       - trader_data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     logging:
       driver: "json-file"
       options:
@@ -16,6 +25,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 2m
+
 volumes:
   trader_data:
     driver: local
