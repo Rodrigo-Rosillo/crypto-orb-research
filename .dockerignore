@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 .pytest_cache/
 *.pyc
+.env
+.env.*
 data/raw/
 reports/forward_test/
 reports/scenarios/
