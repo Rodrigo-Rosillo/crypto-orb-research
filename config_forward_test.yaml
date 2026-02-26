@@ -23,9 +23,9 @@ adx:
   threshold: 43
 
 risk:
-  initial_capital: 10000
+  initial_capital: 100
   # For forward tests, keep sizing conservative. This is a *fraction of free balance used as initial margin*.
-  position_size: 0.20
+  position_size: 0.50
 
 fees:
   taker_fee_rate: 0.0005
@@ -38,13 +38,13 @@ leverage:
 risk_controls:
   enabled: true
   max_position_margin_frac: 0.95
-  max_leverage: 2.0
+  max_leverage: 1.0
   max_daily_loss_pct: 0.03
   max_drawdown_pct: 0.25
-  max_consecutive_losses: 4
+  max_consecutive_losses: 3
   max_exposure_bars: 48
   kill_switch:
-    max_data_gap_bars: 200 # Change to 200 to match original results
+    max_data_gap_bars: 3 # Change to 200 to match original results
     max_order_rejects_per_day: 2
     max_margin_ratio: 0.80
 
@@ -95,7 +95,7 @@ forward_test:
   #   - BINANCE_TESTNET_API_SECRET
   testnet:
     # USD-M futures testnet base URL
-    base_url: "https://demo-fapi.binance.com"
+    base_url: "https://fapi.binance.com"
     recv_window_ms: 5000
     # How often to poll order/position status during live runs (seconds)
     poll_interval_seconds: 2
