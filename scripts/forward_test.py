@@ -65,10 +65,15 @@ def write_skeleton(run_dir: Path) -> None:
     validate_df_columns(pd.DataFrame(columns=ORDERS_COLUMNS), ORDERS_COLUMNS, "orders.csv")
     validate_df_columns(pd.DataFrame(columns=FILLS_COLUMNS), FILLS_COLUMNS, "fills.csv")
     validate_df_columns(pd.DataFrame(columns=POSITIONS_COLUMNS), POSITIONS_COLUMNS, "positions.csv")
-    (run_dir / "signals.csv").write_text(",".join(SIGNALS_COLUMNS) + "\n", encoding="utf-8")
-    (run_dir / "orders.csv").write_text(",".join(ORDERS_COLUMNS) + "\n", encoding="utf-8")
-    (run_dir / "fills.csv").write_text(",".join(FILLS_COLUMNS) + "\n", encoding="utf-8")
-    (run_dir / "positions.csv").write_text(",".join(POSITIONS_COLUMNS) + "\n", encoding="utf-8")
+    for fname, cols in [
+        ("signals.csv", SIGNALS_COLUMNS),
+        ("orders.csv", ORDERS_COLUMNS),
+        ("fills.csv", FILLS_COLUMNS),
+        ("positions.csv", POSITIONS_COLUMNS),
+    ]:
+        p = run_dir / fname
+        if not p.exists() or p.stat().st_size == 0:
+            p.write_text(",".join(cols) + "\n", encoding="utf-8")
     (run_dir / "events.jsonl").touch(exist_ok=True)
 
 
