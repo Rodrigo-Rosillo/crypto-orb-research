@@ -89,6 +89,10 @@ def _is_path_within(path: Path, root: Path) -> bool:
         return False
 
 
+def _should_cancel_on_exit(config_flag: bool, runtime_skip: bool) -> bool:
+    return bool(config_flag) and not bool(runtime_skip)
+
+
 async def run_live_testnet(
     *,
     run_dir,  # Path
@@ -656,12 +660,15 @@ async def run_live_testnet(
             except Exception:
                 pass
 
-            if cancel_open_orders_on_exit:
+            runtime_skip = bool(getattr(trader_service, "skip_cancel_open_orders_on_exit_runtime", False))
+            if _should_cancel_on_exit(cancel_open_orders_on_exit, runtime_skip):
                 try:
                     broker.cancel_all_open_orders(symbol=symbol)
                     append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "CANCEL_ALL_OPEN_ORDERS"}])
                 except Exception as e:
                     append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "CANCEL_ALL_OPEN_ORDERS_FAILED", "error": str(e)}])
+            elif bool(cancel_open_orders_on_exit) and runtime_skip:
+                append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "CANCEL_ALL_OPEN_ORDERS_SKIPPED_RUNTIME_GUARD"}])
 
             append_jsonl(
                 events_path,

@@ -624,6 +624,14 @@ class BinanceFuturesTestnetBroker:
             signed=True,
         )
 
+    def get_algo_open_orders(self, *, symbol: str) -> Any:
+        return self._request(
+            "GET",
+            "/fapi/v1/algoOpenOrders",
+            params={"symbol": symbol},
+            signed=True,
+        )
+
     def cancel_algo_order(self, *, algo_id: int, symbol: Optional[str] = None) -> Any:
         params: Dict[str, Any] = {"algoId": int(algo_id)}
         # Some endpoints accept symbol optional; keep if supplied.

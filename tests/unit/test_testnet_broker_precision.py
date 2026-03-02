@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -132,3 +133,24 @@ def test_exchange_info_is_cached_in_memory() -> None:
     broker._exchange_info()
     broker._exchange_info()
     assert calls["n"] == 1
+
+def test_get_algo_open_orders_wires_expected_endpoint() -> None:
+    broker = object.__new__(BinanceFuturesTestnetBroker)
+
+    observed: dict[str, Any] = {}
+
+    def _fake_request(method: str, path: str, *, params=None, signed=False, timeout: float = 10.0):
+        observed["method"] = method
+        observed["path"] = path
+        observed["params"] = params
+        observed["signed"] = signed
+        return [{"algoId": 123, "symbol": "SOLUSDT", "status": "NEW"}]
+
+    broker._request = _fake_request  # type: ignore[method-assign]
+
+    out = broker.get_algo_open_orders(symbol="SOLUSDT")
+    assert isinstance(out, list)
+    assert observed["method"] == "GET"
+    assert observed["path"] == "/fapi/v1/algoOpenOrders"
+    assert observed["params"] == {"symbol": "SOLUSDT"}
+    assert observed["signed"] is True

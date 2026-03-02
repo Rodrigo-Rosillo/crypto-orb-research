@@ -19,15 +19,40 @@ class FakeBinanceClient:
         reject_entry: bool = False,
         simulate_partial_fill_poll: bool = False,
         fill_price: float = 100.0,
+        reject_tp: bool = False,
+        reject_sl: bool = False,
+        reject_flatten: bool = False,
+        tp_raise_but_land: bool = False,
+        sl_raise_but_land: bool = False,
+        open_algo_orders_override: Optional[Any] = None,
+        fail_get_algo_open_orders: bool = False,
+        server_time_payload: Optional[dict[str, Any]] = None,
+        fail_server_time: bool = False,
     ) -> None:
         self.reject_entry = bool(reject_entry)
         self.simulate_partial_fill_poll = bool(simulate_partial_fill_poll)
         self.fill_price = float(fill_price)
+        self.reject_tp = bool(reject_tp)
+        self.reject_sl = bool(reject_sl)
+        self.reject_flatten = bool(reject_flatten)
+        self.tp_raise_but_land = bool(tp_raise_but_land)
+        self.sl_raise_but_land = bool(sl_raise_but_land)
+        self.open_algo_orders_override = open_algo_orders_override
+        self.fail_get_algo_open_orders = bool(fail_get_algo_open_orders)
+        self.server_time_payload = server_time_payload
+        self.fail_server_time = bool(fail_server_time)
+
+        self.cancel_all_called = False
+        self.cancel_all_call_count = 0
+        self.last_cancel_all_symbol: Optional[str] = None
+        self.position_risk_call_count = 0
 
         self._next_id = 1000
+        self._now_ms = 1_700_000_000_000
         self._position_amt = 0.0
         self._entry_price = 0.0
         self._algo_status: dict[int, str] = {}
+        self._algo_rows: dict[int, dict[str, Any]] = {}
         self._entry_status_script: dict[int, list[dict[str, Any]]] = {}
         self._entry_status_idx: dict[int, int] = {}
         self.last_entry_order_id: Optional[int] = None
@@ -36,9 +61,25 @@ class FakeBinanceClient:
         self._next_id += 1
         return self._next_id
 
+    def _next_ts_ms(self) -> int:
+        self._now_ms += 1000
+        return int(self._now_ms)
+
+    def quantize_price(self, *, symbol: str, price: Any, field_name: str = "price") -> tuple[str, dict[str, Any]]:
+        sent = str(price)
+        return sent, {
+            "symbol": str(symbol).upper(),
+            "field": str(field_name),
+            "raw": sent,
+            "sent": sent,
+            "tickSize": "0.1",
+        }
+
     def place_market_order(self, *, symbol: str, side: str, quantity: float, reduce_only: bool = False) -> Any:
         if self.reject_entry and not bool(reduce_only):
             raise TestnetAPIError("simulated_rejection", status_code=400, payload={"code": -2010})
+        if self.reject_flatten and bool(reduce_only):
+            raise TestnetAPIError("simulated_flatten_rejection", status_code=400, payload={"code": -2010})
 
         oid = self._new_id()
         qty = float(quantity)
@@ -110,7 +151,23 @@ class FakeBinanceClient:
         reduce_only: bool = True,
     ) -> Any:
         algo_id = self._new_id()
+        row = {
+            "algoId": int(algo_id),
+            "symbol": str(symbol).upper(),
+            "type": "TAKE_PROFIT_MARKET",
+            "side": str(side).upper(),
+            "status": "NEW",
+            "triggerPrice": f"{float(stop_price)}",
+            "time": int(self._next_ts_ms()),
+        }
         self._algo_status[int(algo_id)] = "NEW"
+        self._algo_rows[int(algo_id)] = dict(row)
+        if self.tp_raise_but_land:
+            raise TestnetAPIError("simulated_tp_raise_but_land", status_code=500, payload={"code": -1000})
+        if self.reject_tp:
+            self._algo_rows.pop(int(algo_id), None)
+            self._algo_status.pop(int(algo_id), None)
+            raise TestnetAPIError("simulated_tp_rejection", status_code=400, payload={"code": -2010})
         return {"algoId": int(algo_id), "status": "NEW"}
 
     def place_stop_market(
@@ -123,19 +180,75 @@ class FakeBinanceClient:
         reduce_only: bool = True,
     ) -> Any:
         algo_id = self._new_id()
+        row = {
+            "algoId": int(algo_id),
+            "symbol": str(symbol).upper(),
+            "type": "STOP_MARKET",
+            "side": str(side).upper(),
+            "status": "NEW",
+            "triggerPrice": f"{float(stop_price)}",
+            "time": int(self._next_ts_ms()),
+        }
         self._algo_status[int(algo_id)] = "NEW"
+        self._algo_rows[int(algo_id)] = dict(row)
+        if self.sl_raise_but_land:
+            raise TestnetAPIError("simulated_sl_raise_but_land", status_code=500, payload={"code": -1000})
+        if self.reject_sl:
+            self._algo_rows.pop(int(algo_id), None)
+            self._algo_status.pop(int(algo_id), None)
+            raise TestnetAPIError("simulated_sl_rejection", status_code=400, payload={"code": -2010})
         return {"algoId": int(algo_id), "status": "NEW"}
 
     def get_algo_order(self, *, symbol: str, algo_id: int) -> Any:
-        return {"algoId": int(algo_id), "status": self._algo_status.get(int(algo_id), "NEW")}
+        row = dict(self._algo_rows.get(int(algo_id), {}))
+        if not row:
+            row = {
+                "algoId": int(algo_id),
+                "symbol": str(symbol).upper(),
+                "status": self._algo_status.get(int(algo_id), "NEW"),
+            }
+        row["status"] = self._algo_status.get(int(algo_id), str(row.get("status") or "NEW"))
+        return row
+
+    def get_algo_open_orders(self, *, symbol: str) -> Any:
+        if self.fail_get_algo_open_orders:
+            raise TestnetAPIError("simulated_get_algo_open_orders_failure", status_code=500, payload={"code": -1000})
+        if self.open_algo_orders_override is not None:
+            return self.open_algo_orders_override
+        symbol_u = str(symbol).upper()
+        out: list[dict[str, Any]] = []
+        for oid, row in self._algo_rows.items():
+            status = str(self._algo_status.get(int(oid), row.get("status") or "NEW")).upper()
+            if status in ("FILLED", "FINISHED", "CANCELED", "CANCELLED", "REJECTED", "EXPIRED"):
+                continue
+            if str(row.get("symbol") or "").upper() != symbol_u:
+                continue
+            merged = dict(row)
+            merged["status"] = status
+            out.append(merged)
+        return out
+
+    def server_time(self) -> Any:
+        if self.fail_server_time:
+            raise TestnetAPIError("simulated_server_time_failure", status_code=500, payload={"code": -1000})
+        if self.server_time_payload is not None:
+            return dict(self.server_time_payload)
+        return {"serverTime": int(self._next_ts_ms())}
 
     def position_risk(self, *, symbol: str) -> Any:
+        self.position_risk_call_count += 1
         return {
             "symbol": str(symbol),
             "positionAmt": f"{self._position_amt}",
             "entryPrice": f"{self._entry_price}",
             "unRealizedProfit": "0",
         }
+
+    def cancel_all_open_orders(self, *, symbol: str) -> Any:
+        self.cancel_all_called = True
+        self.cancel_all_call_count += 1
+        self.last_cancel_all_symbol = str(symbol)
+        return {"symbol": str(symbol), "status": "ok"}
 
     def account(self) -> Any:
         return {
@@ -187,3 +300,4 @@ def build_trader_service(
         append_rows=_append_rows,
         emit_event=_emit_event,
     )
+

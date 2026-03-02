@@ -31,6 +31,17 @@ def _entry_row() -> pd.Series:
     )
 
 
+
+def _entry_row_missing_orb() -> pd.Series:
+    return pd.Series(
+        {
+            "signal": -1,
+            "signal_type": "downtrend_breakdown",
+            "close": 100.0,
+            "orb_high": None,
+        }
+    )
+
 def _count_trade_log_events(db_path: Path, event_type: str) -> int:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -117,6 +128,350 @@ def test_order_rejection_increments_reject_counter_and_logs(tmp_path: Path) -> N
 
     assert _count_trade_log_events(db_path, "REJECT") == 1
 
+
+
+def test_tp_raise_but_land_recovers_protection_and_persists_open_position(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(tp_raise_but_land=True, fill_price=100.0)
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is not None
+        assert loaded.open_position.tp_order_id is not None
+        assert loaded.open_position.sl_order_id is not None
+        assert trader.stop_event.is_set() is False
+
+
+def test_missing_protection_flattens_and_continues(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(reject_tp=True, fill_price=100.0)
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is None
+        assert trader.stop_event.is_set() is False
+        # known_qty/known_side path should skip pre-fetch and only verify once post-close
+        assert broker.position_risk_call_count == 1
+
+
+def test_unknown_protection_halts_even_if_flatten_succeeds(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(
+            reject_tp=True,
+            fail_get_algo_open_orders=True,
+            fill_price=100.0,
+        )
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is None
+        assert trader.stop_event.is_set() is True
+        assert trader.skip_cancel_open_orders_on_exit_runtime is False
+
+
+def test_bracket_skipped_flattens_first_and_kills_on_flatten_failure(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(reject_flatten=True, fill_price=100.0)
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row_missing_orb()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is None
+        assert trader.stop_event.is_set() is True
+        assert trader.skip_cancel_open_orders_on_exit_runtime is True
+
+
+
+def test_cancel_all_tracking_is_available_for_integration_cleanup(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(fill_price=100.0)
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        assert broker.cancel_all_called is False
+        broker.cancel_all_open_orders(symbol="SOLUSDT")
+        assert broker.cancel_all_called is True
+        assert broker.cancel_all_call_count == 1
+        assert broker.last_cancel_all_symbol == "SOLUSDT"
+
+
+
+def _tp_candidate_row(algo_id: int, trigger_price: float, ts_ms: int | None) -> dict[str, object]:
+    row: dict[str, object] = {
+        "algoId": int(algo_id),
+        "symbol": "SOLUSDT",
+        "type": "TAKE_PROFIT_MARKET",
+        "side": "BUY",
+        "status": "NEW",
+        "triggerPrice": f"{float(trigger_price)}",
+    }
+    if ts_ms is not None:
+        row["time"] = int(ts_ms)
+    return row
+
+
+def test_fallback_tp_candidates_resolve_by_30s_retry_window(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(tp_raise_but_land=True, fill_price=100.0)
+        baseline_ms = int(broker._now_ms + 1000)
+        broker.open_algo_orders_override = [
+            _tp_candidate_row(algo_id=2201, trigger_price=98.05, ts_ms=baseline_ms - 120_000),
+            _tp_candidate_row(algo_id=2202, trigger_price=98.08, ts_ms=baseline_ms - 10_000),
+        ]
+
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is not None
+        assert loaded.open_position.tp_order_id == 2202
+        assert trader.stop_event.is_set() is False
+
+
+def test_fallback_tp_candidates_resolve_by_most_recent_timestamp(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(tp_raise_but_land=True, fill_price=100.0)
+        baseline_ms = int(broker._now_ms + 1000)
+        broker.open_algo_orders_override = [
+            _tp_candidate_row(algo_id=2301, trigger_price=98.01, ts_ms=baseline_ms - 25_000),
+            _tp_candidate_row(algo_id=2302, trigger_price=98.07, ts_ms=baseline_ms - 5_000),
+        ]
+
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is not None
+        assert loaded.open_position.tp_order_id == 2302
+        assert trader.stop_event.is_set() is False
+
+
+def test_fallback_tp_candidates_timestamp_tie_resolves_by_highest_algo_id(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(tp_raise_but_land=True, fill_price=100.0)
+        baseline_ms = int(broker._now_ms + 1000)
+        tie_ts = baseline_ms - 8_000
+        broker.open_algo_orders_override = [
+            _tp_candidate_row(algo_id=2401, trigger_price=98.00, ts_ms=tie_ts),
+            _tp_candidate_row(algo_id=2402, trigger_price=98.09, ts_ms=tie_ts),
+        ]
+
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is not None
+        assert loaded.open_position.tp_order_id == 2402
+        assert trader.stop_event.is_set() is False
+
+
+def test_fallback_tp_non_comparable_timestamps_triggers_unknown_branch(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(tp_raise_but_land=True, fill_price=100.0)
+        broker.open_algo_orders_override = [
+            _tp_candidate_row(algo_id=2501, trigger_price=98.05, ts_ms=None),
+        ]
+
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is None
+        assert trader.stop_event.is_set() is True
+        assert trader.skip_cancel_open_orders_on_exit_runtime is False
+
+
+def test_missing_protection_with_flatten_failure_halts_and_sets_runtime_skip(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(
+            reject_tp=True,
+            reject_flatten=True,
+            open_algo_orders_override=[],
+            fill_price=100.0,
+        )
+
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is None
+        assert trader.stop_event.is_set() is True
+        assert trader.skip_cancel_open_orders_on_exit_runtime is True
+
+
+def test_protection_baseline_uses_exchange_then_local_fallback(tmp_path: Path) -> None:
+    db_path_a = tmp_path / "state_a.db"
+    with SQLiteStateStore(db_path=db_path_a) as store_a:
+        state_a = store_a.load_state()
+        broker_a = FakeBinanceClient(fill_price=100.0)
+        trader_a = build_trader_service(
+            broker=broker_a,
+            store=store_a,
+            state=state_a,
+            work_dir=tmp_path / "a",
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+        epoch_a, source_a = trader_a._protection_baseline_epoch_seconds()
+        assert source_a == "exchange"
+        assert isinstance(epoch_a, float)
+        assert epoch_a > 1_700_000_000.0
+
+    db_path_b = tmp_path / "state_b.db"
+    with SQLiteStateStore(db_path=db_path_b) as store_b:
+        state_b = store_b.load_state()
+        broker_b = FakeBinanceClient(fill_price=100.0, fail_server_time=True)
+        trader_b = build_trader_service(
+            broker=broker_b,
+            store=store_b,
+            state=state_b,
+            work_dir=tmp_path / "b",
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+        t0 = time.time()
+        epoch_b, source_b = trader_b._protection_baseline_epoch_seconds()
+        t1 = time.time()
+        assert source_b == "local_fallback"
+        assert isinstance(epoch_b, float)
+        assert max(0.0, t0 - 5.0) <= epoch_b <= (t1 + 5.0)
 
 class _FakeReconnectSource:
     def __init__(self, bar_1: LiveBar, bar_2: LiveBar):
@@ -284,3 +639,4 @@ def test_sigkill_restart_does_not_reenter_open_position(tmp_path: Path) -> None:
         assert loaded.open_position is not None
         assert loaded.bars_processed >= 0
         assert loaded.order_rejects_today >= 0
+

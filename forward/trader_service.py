@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
@@ -69,6 +70,10 @@ def _order_exec_qty(resp: Any) -> float:
     return 0.0
 
 
+PROTECTION_RECENCY_WINDOW_SECONDS = 180
+PROTECTION_AMBIGUITY_RETRY_WINDOW_SECONDS = 30
+PROTECTION_PRICE_TOL_TICKS = 1
+
 def _compact_json(data: Any) -> str:
     try:
         return json.dumps(data, sort_keys=True, separators=(",", ":"))
@@ -120,6 +125,7 @@ class TraderService:
         self.positions_path = positions_path
         self.append_rows = append_rows
         self.emit_event = emit_event
+        self.skip_cancel_open_orders_on_exit_runtime = False
 
     def persist_state(self) -> None:
         self.store.save_state(self.state)
@@ -230,6 +236,476 @@ class TraderService:
         except Exception as e:
             self.emit_event([{"ts": _utcnow_iso(), "type": "MARGIN_RATIO_CHECK_FAILED", "error": str(e)}])
 
+    def _protection_baseline_epoch_seconds(self) -> tuple[float, str]:
+        if hasattr(self.broker, "server_time"):
+            try:
+                resp = self.broker.server_time()
+                return float(int(resp["serverTime"]) / 1000.0), "exchange"
+            except Exception:
+                pass
+        # Local time fallback is acceptable here because recency matching allows drift.
+        return float(time.time()), "local_fallback"
+
+    @staticmethod
+    def _is_terminal_algo_status(status: str) -> bool:
+        st = str(status or "").upper()
+        return st in ("FILLED", "FINISHED", "CANCELED", "CANCELLED", "REJECTED", "EXPIRED")
+
+    @staticmethod
+    def _safe_epoch_seconds(value: Any) -> Optional[float]:
+        try:
+            v = float(value)
+        except Exception:
+            return None
+        if v != v or v in (float("inf"), float("-inf")) or v <= 0:
+            return None
+        if v > 1e11:
+            v = v / 1000.0
+        return float(v)
+
+    def _algo_rows_from_payload(self, payload: Any) -> tuple[list[dict[str, Any]], bool]:
+        if isinstance(payload, list):
+            return [r for r in payload if isinstance(r, dict)], True
+        if isinstance(payload, dict):
+            for key in ("data", "rows", "orders", "openOrders", "list"):
+                v = payload.get(key)
+                if isinstance(v, list):
+                    return [r for r in v if isinstance(r, dict)], True
+            if any(k in payload for k in ("algoId", "algoID", "orderId", "orderID")):
+                return [payload], True
+        return [], False
+
+    def _algo_timestamp_seconds(self, row: dict[str, Any]) -> Optional[float]:
+        for key in ("time", "updateTime", "createTime", "workingTime", "timestamp"):
+            if row.get(key) not in (None, ""):
+                ts = self._safe_epoch_seconds(row.get(key))
+                if ts is not None:
+                    return ts
+        return None
+
+    @staticmethod
+    def _algo_trigger_price(row: dict[str, Any]) -> Optional[float]:
+        for key in ("triggerPrice", "stopPrice", "price"):
+            if row.get(key) not in (None, ""):
+                return _float(row.get(key), 0.0)
+        return None
+
+    @staticmethod
+    def _algo_type(row: dict[str, Any]) -> str:
+        return str(row.get("type") or row.get("orderType") or row.get("algoType") or "").upper()
+
+    @staticmethod
+    def _algo_side(row: dict[str, Any]) -> str:
+        return str(row.get("side") or "").upper()
+
+    @staticmethod
+    def _tick_size_from_meta(meta: dict[str, Any]) -> float:
+        if not isinstance(meta, dict):
+            return 0.0
+        return max(0.0, _float(meta.get("tickSize"), 0.0))
+
+    @staticmethod
+    def _trigger_price_matches(expected: float, actual: float, tick_size: float) -> bool:
+        tol = float(tick_size) * float(PROTECTION_PRICE_TOL_TICKS) if float(tick_size) > 0 else 0.0
+        return abs(float(expected) - float(actual)) <= max(0.0, tol)
+    
+    def _find_matching_leg_from_open_orders(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        expected_type: str,
+        expected_side: str,
+        expected_price: float,
+        tick_size: float,
+        baseline_epoch_s: float,
+    ) -> dict[str, Any]:
+        symbol_u = str(self.symbol).upper()
+        structural: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            row_symbol = str(row.get("symbol") or "").upper()
+            if row_symbol and row_symbol != symbol_u:
+                continue
+            if self._algo_type(row) != str(expected_type).upper():
+                continue
+            if self._algo_side(row) != str(expected_side).upper():
+                continue
+            status = str(row.get("status") or row.get("algoStatus") or "")
+            if self._is_terminal_algo_status(status):
+                continue
+            trigger = self._algo_trigger_price(row)
+            if trigger is None:
+                continue
+            if not self._trigger_price_matches(float(expected_price), float(trigger), float(tick_size)):
+                continue
+            structural.append(
+                {
+                    "row": row,
+                    "ts": self._algo_timestamp_seconds(row),
+                    "algo_id": _extract_order_id(row),
+                }
+            )
+
+        if not structural:
+            return {"status": "missing", "reason": "no_structural_candidates", "candidates": 0}
+
+        with_ts = [c for c in structural if c.get("ts") is not None]
+        if not with_ts:
+            return {
+                "status": "unknown",
+                "reason": "timestamps_unavailable",
+                "candidates": int(len(structural)),
+            }
+
+        recent = [
+            c
+            for c in with_ts
+            if float(c.get("ts") or 0.0) >= float(baseline_epoch_s - float(PROTECTION_RECENCY_WINDOW_SECONDS))
+        ]
+        if not recent:
+            return {
+                "status": "missing",
+                "reason": "no_recent_candidates",
+                "candidates": int(len(with_ts)),
+            }
+        if len(recent) == 1:
+            oid = recent[0].get("algo_id")
+            if oid is None:
+                return {"status": "unknown", "reason": "algo_id_missing", "candidates": 1}
+            return {"status": "recovered", "order_id": int(oid), "reason": "single_recent_candidate", "candidates": 1}
+
+        tight = [
+            c
+            for c in recent
+            if float(c.get("ts") or 0.0) >= float(baseline_epoch_s - float(PROTECTION_AMBIGUITY_RETRY_WINDOW_SECONDS))
+        ]
+        if len(tight) == 1:
+            oid = tight[0].get("algo_id")
+            if oid is None:
+                return {"status": "unknown", "reason": "algo_id_missing", "candidates": 1}
+            return {"status": "recovered", "order_id": int(oid), "reason": "single_tight_candidate", "candidates": 1}
+
+        pool = tight if len(tight) > 1 else recent
+        try:
+            max_ts = max(float(c.get("ts") or 0.0) for c in pool)
+        except Exception:
+            return {
+                "status": "unknown",
+                "reason": "timestamps_not_comparable",
+                "candidates": int(len(pool)),
+            }
+
+        most_recent = [c for c in pool if float(c.get("ts") or 0.0) == float(max_ts)]
+        with_algo_id = [c for c in most_recent if c.get("algo_id") is not None]
+        if with_algo_id:
+            chosen = max(with_algo_id, key=lambda c: int(c.get("algo_id") or 0))
+            return {
+                "status": "recovered",
+                "order_id": int(chosen.get("algo_id")),
+                "reason": "resolved_by_recent_ts_then_algo_id",
+                "candidates": int(len(pool)),
+            }
+
+        chosen = most_recent[-1]
+        if chosen.get("algo_id") is None:
+            return {
+                "status": "unknown",
+                "reason": "algo_id_missing_after_tiebreak",
+                "candidates": int(len(pool)),
+            }
+        return {
+            "status": "recovered",
+            "order_id": int(chosen.get("algo_id")),
+            "reason": "resolved_by_recent_ts",
+            "candidates": int(len(pool)),
+        }
+
+    def _resolve_protection_orders(
+        self,
+        *,
+        tp_oid: Optional[int],
+        sl_oid: Optional[int],
+        exit_side: str,
+        tp_sent_price: float,
+        sl_sent_price: float,
+        tp_tick_size: float,
+        sl_tick_size: float,
+        baseline_epoch_s: float,
+    ) -> dict[str, Any]:
+        tp_final = int(tp_oid) if tp_oid is not None else None
+        sl_final = int(sl_oid) if sl_oid is not None else None
+        details: dict[str, Any] = {}
+        recovered_from_fallback = False
+
+        if tp_final is not None and sl_final is not None:
+            return {
+                "status": "protected",
+                "tp_order_id": tp_final,
+                "sl_order_id": sl_final,
+                "reason": "ids_from_place_calls",
+                "details": details,
+                "recovered_from_fallback": False,
+            }
+
+        if not hasattr(self.broker, "get_algo_open_orders"):
+            return {
+                "status": "unknown",
+                "tp_order_id": tp_final,
+                "sl_order_id": sl_final,
+                "reason": "get_algo_open_orders_not_supported",
+                "details": details,
+                "recovered_from_fallback": False,
+            }
+
+        try:
+            open_payload = self.broker.get_algo_open_orders(symbol=self.symbol)
+        except Exception as e:
+            return {
+                "status": "unknown",
+                "tp_order_id": tp_final,
+                "sl_order_id": sl_final,
+                "reason": f"get_algo_open_orders_failed:{e}",
+                "details": details,
+                "recovered_from_fallback": False,
+            }
+
+        rows, parse_ok = self._algo_rows_from_payload(open_payload)
+        if not parse_ok:
+            return {
+                "status": "unknown",
+                "tp_order_id": tp_final,
+                "sl_order_id": sl_final,
+                "reason": "get_algo_open_orders_unparseable",
+                "details": {"raw": str(open_payload)},
+                "recovered_from_fallback": False,
+            }
+
+        if tp_final is None:
+            tp_match = self._find_matching_leg_from_open_orders(
+                rows=rows,
+                expected_type="TAKE_PROFIT_MARKET",
+                expected_side=str(exit_side),
+                expected_price=float(tp_sent_price),
+                tick_size=float(tp_tick_size),
+                baseline_epoch_s=float(baseline_epoch_s),
+            )
+            details["tp"] = tp_match
+            if tp_match.get("status") == "recovered":
+                tp_final = int(tp_match.get("order_id"))
+                recovered_from_fallback = True
+
+        if sl_final is None:
+            sl_match = self._find_matching_leg_from_open_orders(
+                rows=rows,
+                expected_type="STOP_MARKET",
+                expected_side=str(exit_side),
+                expected_price=float(sl_sent_price),
+                tick_size=float(sl_tick_size),
+                baseline_epoch_s=float(baseline_epoch_s),
+            )
+            details["sl"] = sl_match
+            if sl_match.get("status") == "recovered":
+                sl_final = int(sl_match.get("order_id"))
+                recovered_from_fallback = True
+
+        if any(str(details.get(k, {}).get("status", "")) == "unknown" for k in ("tp", "sl") if k in details):
+            return {
+                "status": "unknown",
+                "tp_order_id": tp_final,
+                "sl_order_id": sl_final,
+                "reason": "fallback_unknown",
+                "details": details,
+                "recovered_from_fallback": recovered_from_fallback,
+            }
+
+        if tp_final is None or sl_final is None:
+            return {
+                "status": "missing",
+                "tp_order_id": tp_final,
+                "sl_order_id": sl_final,
+                "reason": "one_or_more_legs_missing",
+                "details": details,
+                "recovered_from_fallback": recovered_from_fallback,
+            }
+
+        return {
+            "status": "protected",
+            "tp_order_id": tp_final,
+            "sl_order_id": sl_final,
+            "reason": "resolved",
+            "details": details,
+            "recovered_from_fallback": recovered_from_fallback,
+        }
+
+    def _emergency_flatten(
+        self,
+        *,
+        reason: str,
+        known_qty: Optional[float] = None,
+        known_side: Optional[str] = None,
+    ) -> tuple[bool, str]:
+        close_qty = 0.0
+        close_side = ""
+        source = "exchange_position"
+        known_side_u = str(known_side or "").upper()
+
+        if known_qty is not None and float(known_qty) > 1e-9 and known_side_u in ("LONG", "SHORT"):
+            close_qty = float(known_qty)
+            close_side = "SELL" if known_side_u == "LONG" else "BUY"
+            source = "known_values"
+        else:
+            try:
+                ex_side, ex_qty, _, _ = self.fetch_exchange_position()
+            except Exception as e:
+                self.emit_event(
+                    [
+                        {
+                            "ts": _utcnow_iso(),
+                            "type": "EMERGENCY_FLATTEN_FAILED",
+                            "reason": str(reason),
+                            "error": f"position_fetch_failed:{e}",
+                        }
+                    ]
+                )
+                return False, "position_fetch_failed"
+
+            if ex_side == "FLAT" or ex_qty < 1e-9:
+                self.emit_event(
+                    [
+                        {
+                            "ts": _utcnow_iso(),
+                            "type": "EMERGENCY_FLATTEN_SUCCESS",
+                            "reason": str(reason),
+                            "status": "already_flat",
+                        }
+                    ]
+                )
+                return True, "already_flat"
+            close_qty = float(ex_qty)
+            close_side = "SELL" if ex_side == "LONG" else "BUY"
+            known_side_u = str(ex_side)
+
+        self.emit_event(
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "EMERGENCY_FLATTEN_SUBMIT",
+                    "reason": str(reason),
+                    "side": str(close_side),
+                    "qty": float(close_qty),
+                    "source": str(source),
+                }
+            ]
+        )
+
+        flatten_oid = None
+        try:
+            flatten_resp = self.broker.place_market_order(
+                symbol=self.symbol,
+                side=str(close_side),
+                quantity=float(close_qty),
+                reduce_only=True,
+            )
+            flatten_oid = _extract_order_id(flatten_resp)
+        except Exception as e:
+            self.emit_event(
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "EMERGENCY_FLATTEN_FAILED",
+                        "reason": str(reason),
+                        "error": str(e),
+                    }
+                ]
+            )
+            return False, "flatten_submit_failed"
+
+        try:
+            post_side, post_qty, _, _ = self.fetch_exchange_position()
+        except Exception as e:
+            self.emit_event(
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "EMERGENCY_FLATTEN_FAILED",
+                        "reason": str(reason),
+                        "order_id": int(flatten_oid or 0),
+                        "error": f"post_flatten_position_fetch_failed:{e}",
+                    }
+                ]
+            )
+            return False, "post_flatten_position_fetch_failed"
+
+        if post_side == "FLAT" or post_qty < 1e-9:
+            self.emit_event(
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "EMERGENCY_FLATTEN_SUCCESS",
+                        "reason": str(reason),
+                        "order_id": int(flatten_oid or 0),
+                        "side": str(close_side),
+                        "qty": float(close_qty),
+                    }
+                ]
+            )
+            try:
+                self.store.append_trade_log(
+                    event_type="EXIT",
+                    symbol=self.symbol,
+                    side=known_side_u if known_side_u in ("LONG", "SHORT") else None,
+                    qty=float(close_qty),
+                    price=None,
+                    realized_pnl=None,
+                    fee=None,
+                    funding_applied=None,
+                    reason=f"EMERGENCY_FLATTEN:{reason}",
+                    bar_time_utc=_utcnow_iso(),
+                )
+            except Exception:
+                pass
+            return True, "flattened"
+
+        self.emit_event(
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "EMERGENCY_FLATTEN_FAILED",
+                    "reason": str(reason),
+                    "order_id": int(flatten_oid or 0),
+                    "exchange_side": str(post_side),
+                    "exchange_qty": float(post_qty),
+                    "error": "position_not_flat_after_flatten",
+                }
+            ]
+        )
+        return False, "position_not_flat_after_flatten"
+
+    def _trigger_protection_kill_switch(self, reason: str, detail: str) -> None:
+        self.emit_event(
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": str(reason),
+                    "detail": str(detail),
+                }
+            ]
+        )
+        self.store.append_trade_log(
+            event_type="KILL_SWITCH",
+            symbol=self.symbol,
+            side=None,
+            qty=None,
+            price=None,
+            realized_pnl=None,
+            fee=None,
+            funding_applied=None,
+            reason=f"{reason}:{detail}",
+            bar_time_utc=_utcnow_iso(),
+        )
+        self.stop_event.set()
+    
     async def maybe_place_trade_from_signal(self, bar_open_time: pd.Timestamp, row: pd.Series) -> None:
         if self.state.open_position is not None:
             return
@@ -496,15 +972,19 @@ class TraderService:
         orb_high = row.get("orb_high")
         if orb_high is None or (isinstance(orb_high, float) and pd.isna(orb_high)):
             self.emit_event([{"ts": _utcnow_iso(), "type": "BRACKET_SKIPPED", "reason": "missing_orb_high"}])
-            self.state.open_position = OpenPositionState(
-                symbol=self.symbol,
-                side=pos_side,
-                qty=float(entry_qty),
-                entry_price=float(entry_price),
-                entry_time_utc=bar_open_time.tz_convert("UTC").isoformat(),
-                entry_order_id=int(entry_oid or 0),
+            flatten_ok, flatten_detail = self._emergency_flatten(
+                reason="missing_orb_high",
+                known_qty=float(entry_qty),
+                known_side=pos_side,
             )
+            self.state.open_position = None
             self.persist_state()
+            if not flatten_ok:
+                self.skip_cancel_open_orders_on_exit_runtime = True
+                self._trigger_protection_kill_switch(
+                    "KILL_SWITCH_UNPROTECTED_POSITION",
+                    f"missing_orb_high:{flatten_detail}",
+                )
             return
 
         sl_price = float(orb_high)
@@ -525,6 +1005,18 @@ class TraderService:
                 sl_sent_price = _float(sl_price_sent_str, sl_sent_price)
             except Exception:
                 sl_price_meta = {}
+
+        protection_baseline_epoch_s, baseline_source = self._protection_baseline_epoch_seconds()
+        if baseline_source != "exchange":
+            self.emit_event(
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "PROTECTION_BASELINE_LOCAL_FALLBACK",
+                        "window_seconds": int(PROTECTION_RECENCY_WINDOW_SECONDS),
+                    }
+                ]
+            )
 
         self.emit_event(
             [
@@ -635,16 +1127,96 @@ class TraderService:
             "orders.csv",
         )
 
-        self.state.open_position = OpenPositionState(
-            symbol=self.symbol,
-            side=pos_side,
-            qty=float(entry_qty),
-            entry_price=float(entry_price),
-            entry_time_utc=bar_open_time.tz_convert("UTC").isoformat(),
-            entry_order_id=int(entry_oid or 0),
-            tp_order_id=int(tp_oid) if tp_oid is not None else None,
-            sl_order_id=int(sl_oid) if sl_oid is not None else None,
-            tp_price=float(tp_sent_price),
-            sl_price=float(sl_sent_price),
+        protection = self._resolve_protection_orders(
+            tp_oid=int(tp_oid) if tp_oid is not None else None,
+            sl_oid=int(sl_oid) if sl_oid is not None else None,
+            exit_side=str(exit_side),
+            tp_sent_price=float(tp_sent_price),
+            sl_sent_price=float(sl_sent_price),
+            tp_tick_size=float(self._tick_size_from_meta(tp_price_meta)),
+            sl_tick_size=float(self._tick_size_from_meta(sl_price_meta)),
+            baseline_epoch_s=float(protection_baseline_epoch_s),
         )
+
+        p_status = str(protection.get("status") or "")
+        p_details = protection.get("details") if isinstance(protection.get("details"), dict) else {}
+
+        if p_status == "protected":
+            if bool(protection.get("recovered_from_fallback")):
+                self.emit_event(
+                    [
+                        {
+                            "ts": _utcnow_iso(),
+                            "type": "PROTECTION_VERIFY_RECOVERED",
+                            "reason": str(protection.get("reason") or ""),
+                            "details": p_details,
+                        }
+                    ]
+                )
+
+            self.state.open_position = OpenPositionState(
+                symbol=self.symbol,
+                side=pos_side,
+                qty=float(entry_qty),
+                entry_price=float(entry_price),
+                entry_time_utc=bar_open_time.tz_convert("UTC").isoformat(),
+                entry_order_id=int(entry_oid or 0),
+                tp_order_id=int(protection.get("tp_order_id")) if protection.get("tp_order_id") is not None else None,
+                sl_order_id=int(protection.get("sl_order_id")) if protection.get("sl_order_id") is not None else None,
+                tp_price=float(tp_sent_price),
+                sl_price=float(sl_sent_price),
+            )
+            self.persist_state()
+            return
+
+        if p_status == "missing":
+            self.emit_event(
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "PROTECTION_VERIFY_MISSING",
+                        "reason": str(protection.get("reason") or ""),
+                        "details": p_details,
+                    }
+                ]
+            )
+            flatten_ok, flatten_detail = self._emergency_flatten(
+                reason="protection_missing",
+                known_qty=float(entry_qty),
+                known_side=pos_side,
+            )
+            self.state.open_position = None
+            self.persist_state()
+            if not flatten_ok:
+                self.skip_cancel_open_orders_on_exit_runtime = True
+                self._trigger_protection_kill_switch(
+                    "KILL_SWITCH_UNPROTECTED_POSITION",
+                    f"protection_missing:{flatten_detail}",
+                )
+            return
+
+        self.emit_event(
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "PROTECTION_VERIFY_UNKNOWN",
+                    "reason": str(protection.get("reason") or ""),
+                    "details": p_details,
+                }
+            ]
+        )
+        flatten_ok, flatten_detail = self._emergency_flatten(
+            reason="protection_unknown",
+            known_qty=float(entry_qty),
+            known_side=pos_side,
+        )
+        self.state.open_position = None
         self.persist_state()
+        if not flatten_ok:
+            self.skip_cancel_open_orders_on_exit_runtime = True
+        # Flatten success does not re-establish trust in broker verification APIs.
+        self._trigger_protection_kill_switch(
+            "KILL_SWITCH_PROTECTION_UNKNOWN",
+            f"{str(protection.get('reason') or 'unknown')}:{flatten_detail}",
+        )
+        return
