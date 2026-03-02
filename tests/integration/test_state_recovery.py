@@ -264,12 +264,18 @@ def test_cancel_all_tracking_is_available_for_integration_cleanup(tmp_path: Path
 
 
 
-def _tp_candidate_row(algo_id: int, trigger_price: float, ts_ms: int | None) -> dict[str, object]:
+def _tp_candidate_row(
+    algo_id: int,
+    trigger_price: float,
+    ts_ms: int | None,
+    *,
+    side: str = "BUY",
+) -> dict[str, object]:
     row: dict[str, object] = {
         "algoId": int(algo_id),
         "symbol": "SOLUSDT",
         "type": "TAKE_PROFIT_MARKET",
-        "side": "BUY",
+        "side": str(side).upper(),
         "status": "NEW",
         "triggerPrice": f"{float(trigger_price)}",
     }
