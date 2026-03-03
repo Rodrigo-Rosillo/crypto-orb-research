@@ -232,6 +232,17 @@ class TraderService:
                     reason="KILL_SWITCH_MARGIN_RATIO",
                     bar_time_utc=_utcnow_iso(),
                 )
+                if self.state.open_position is not None:
+                    flatten_ok, _ = self._emergency_flatten(reason="KILL_SWITCH_MARGIN_RATIO")
+                    if flatten_ok:
+                        self.state.open_position = None
+                        self.skip_cancel_open_orders_on_exit_runtime = False
+                        try:
+                            self.persist_state()
+                        except Exception:
+                            pass
+                    else:
+                        self.skip_cancel_open_orders_on_exit_runtime = True
                 self.stop_event.set()
         except Exception as e:
             self.emit_event([{"ts": _utcnow_iso(), "type": "MARGIN_RATIO_CHECK_FAILED", "error": str(e)}])

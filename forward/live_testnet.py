@@ -660,6 +660,30 @@ async def run_live_testnet(
             except Exception:
                 pass
 
+            open_position = trader_service.state.open_position
+            if open_position is not None:
+                try:
+                    flatten_ok, flatten_detail = trader_service._emergency_flatten(reason="SHUTDOWN_GUARD")
+                    if flatten_ok:
+                        trader_service.state.open_position = None
+                        trader_service.skip_cancel_open_orders_on_exit_runtime = False
+                        try:
+                            trader_service.persist_state()
+                        except Exception:
+                            pass
+                    else:
+                        trader_service.skip_cancel_open_orders_on_exit_runtime = True
+                        append_jsonl(
+                            events_path,
+                            [{"ts": _utcnow_iso(), "type": "SHUTDOWN_GUARD_FLATTEN_FAILED", "detail": str(flatten_detail)}],
+                        )
+                except Exception as e:
+                    trader_service.skip_cancel_open_orders_on_exit_runtime = True
+                    append_jsonl(
+                        events_path,
+                        [{"ts": _utcnow_iso(), "type": "SHUTDOWN_GUARD_FLATTEN_ERROR", "error": str(e)}],
+                    )
+
             runtime_skip = bool(getattr(trader_service, "skip_cancel_open_orders_on_exit_runtime", False))
             if _should_cancel_on_exit(cancel_open_orders_on_exit, runtime_skip):
                 try:
