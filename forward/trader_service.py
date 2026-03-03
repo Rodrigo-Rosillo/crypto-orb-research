@@ -247,6 +247,42 @@ class TraderService:
         except Exception as e:
             self.emit_event([{"ts": _utcnow_iso(), "type": "MARGIN_RATIO_CHECK_FAILED", "error": str(e)}])
 
+    def _get_effective_capital_for_entry(self) -> tuple[float | None, dict[str, Any]]:
+        account_method = getattr(self.broker, "account", None)
+        if not callable(account_method):
+            return None, {"error": "account_method_missing"}
+
+        try:
+            acct = account_method()
+        except Exception as e:
+            return None, {"error": "account_fetch_exception", "exception": str(e)}
+
+        if not isinstance(acct, dict):
+            return None, {"error": "account_payload_not_dict", "payload_type": type(acct).__name__}
+
+        live_available = _float(acct.get("availableBalance"), 0.0)
+        live_margin_balance = _float(acct.get("totalMarginBalance"), 0.0)
+        if live_available > 0:
+            live_base = live_available
+        elif live_margin_balance > 0:
+            live_base = live_margin_balance
+        else:
+            return None, {
+                "error": "account_balance_missing_or_nonpositive",
+                "availableBalance": float(live_available),
+                "totalMarginBalance": float(live_margin_balance),
+            }
+
+        cap = float(self.initial_capital)
+        effective = min(cap, live_base) if cap > 0 else live_base
+        return float(effective), {
+            "availableBalance": float(live_available),
+            "totalMarginBalance": float(live_margin_balance),
+            "live_base": float(live_base),
+            "cap": float(cap),
+            "effective": float(effective),
+        }
+
     def _protection_baseline_epoch_seconds(self) -> tuple[float, str]:
         if hasattr(self.broker, "server_time"):
             try:
@@ -800,7 +836,62 @@ class TraderService:
         price = float(row.get("close") or 0.0)
         if price <= 0:
             return
-        margin = float(self.initial_capital) * float(self.position_size)
+
+        effective_capital, details = self._get_effective_capital_for_entry()
+        if effective_capital is None:
+            self.emit_event(
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "ENTRY_SKIPPED",
+                        "reason": "balance_fetch_failed",
+                        "details": details,
+                        "symbol": self.symbol,
+                        "signal_type": signal_type,
+                        "leverage": float(self.leverage),
+                        "position_size": float(self.position_size),
+                        "price": float(price),
+                    }
+                ]
+            )
+            self.append_rows(
+                self.orders_path,
+                [
+                    {
+                        "timestamp_utc": _utcnow_iso(),
+                        "due_timestamp_utc": "",
+                        "order_id": "",
+                        "symbol": self.symbol,
+                        "side": pos_side,
+                        "qty": 0.0,
+                        "order_type": "MARKET",
+                        "limit_price": "",
+                        "status": "blocked",
+                        "status_detail": "balance_fetch_failed",
+                        "reason": signal_type,
+                    }
+                ],
+                ORDERS_COLUMNS,
+                "orders.csv",
+            )
+            return
+
+        self.emit_event(
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "SIZING_SNAPSHOT",
+                    "config_initial_capital": float(self.initial_capital),
+                    "live_availableBalance": float(details["availableBalance"]),
+                    "live_totalMarginBalance": float(details["totalMarginBalance"]),
+                    "effective_capital_used": float(effective_capital),
+                    "position_size": float(self.position_size),
+                    "leverage": float(self.leverage),
+                    "price": float(price),
+                }
+            ]
+        )
+        margin = float(effective_capital) * float(self.position_size)
         notional = margin * float(self.leverage)
         qty = max(0.0, notional / price)
         if qty <= 0:
@@ -1231,3 +1322,4 @@ class TraderService:
             f"{str(protection.get('reason') or 'unknown')}:{flatten_detail}",
         )
         return
+
