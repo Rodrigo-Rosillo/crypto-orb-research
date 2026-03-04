@@ -15,6 +15,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import yaml
@@ -58,6 +59,20 @@ def get_git_head() -> str:
     except Exception:
         return ""
 
+
+def _parse_leverage(cfg: dict[str, Any]) -> float:
+    lev_cfg = cfg.get("leverage") or {}
+    if not isinstance(lev_cfg, dict):
+        raise ValueError("leverage must be a mapping when provided")
+
+    leverage = float(lev_cfg.get("max_leverage", 1.0)) if bool(lev_cfg.get("enabled", True)) else 1.0
+    if leverage != float(int(leverage)):
+        raise ValueError(
+            f"leverage.max_leverage must be a whole number, got {leverage}. "
+            f"Binance applies int() truncation. Use {int(leverage)} or {int(leverage) + 1}."
+        )
+    leverage = float(int(leverage))
+    return leverage
 
 def write_skeleton(run_dir: Path) -> None:
     """Create placeholder artifacts for not-yet-implemented forward-test modes."""
@@ -289,8 +304,7 @@ def main() -> int:
         position_size = float(cfg["risk"]["position_size"])
         taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
 
-        lev_cfg = cfg.get("leverage") or {}
-        leverage = float(lev_cfg.get("max_leverage", 1.0)) if bool(lev_cfg.get("enabled", True)) else 1.0
+        leverage = _parse_leverage(cfg)
 
         exec_cfg = (ft_cfg.get("execution_model") or {}) if isinstance(ft_cfg, dict) else {}
         delay_bars = int(exec_cfg.get("delay_bars", 1))
@@ -416,8 +430,7 @@ def main() -> int:
         position_size = float(cfg["risk"]["position_size"])
         taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
 
-        lev_cfg = cfg.get("leverage") or {}
-        leverage = float(lev_cfg.get("max_leverage", 1.0)) if bool(lev_cfg.get("enabled", True)) else 1.0
+        leverage = _parse_leverage(cfg)
 
         exec_cfg = (ft_cfg.get("execution_model") or {}) if isinstance(ft_cfg, dict) else {}
         delay_bars = int(exec_cfg.get("delay_bars", 1))
@@ -477,8 +490,7 @@ def main() -> int:
         position_size = float(cfg["risk"]["position_size"])
         taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
 
-        lev_cfg = cfg.get("leverage") or {}
-        leverage = float(lev_cfg.get("max_leverage", 1.0)) if bool(lev_cfg.get("enabled", True)) else 1.0
+        leverage = _parse_leverage(cfg)
 
         exec_cfg = (ft_cfg.get("execution_model") or {}) if isinstance(ft_cfg, dict) else {}
         delay_bars = int(exec_cfg.get("delay_bars", 1))
@@ -610,3 +622,4 @@ def _main_with_heartbeat() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(_main_with_heartbeat())
+

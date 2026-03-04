@@ -320,12 +320,29 @@ async def run_live_testnet(
         append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": float(initial_capital), "reason": "TESTNET_AUTH_ERROR"}])
         return 0
 
-    # Best-effort set leverage
+    # Set leverage and abort startup if exchange confirmation fails.
+    requested_leverage = int(leverage)
     try:
-        broker.set_leverage(symbol, int(leverage))
-        append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "TESTNET_SET_LEVERAGE", "leverage": int(leverage)}])
+        leverage_resp = broker.set_leverage(symbol, requested_leverage)
+        raw = (leverage_resp or {}).get("leverage")
+        if raw is None:
+            raise RuntimeError(f"leverage key missing from set_leverage response: {leverage_resp!r}")
+        confirmed_leverage = int(raw)
+        if confirmed_leverage != requested_leverage:
+            raise RuntimeError(
+                f"Leverage mismatch after set_leverage: requested={requested_leverage}, confirmed={confirmed_leverage}"
+            )
+        append_jsonl(
+            events_path,
+            [{"ts": _utcnow_iso(), "type": "TESTNET_SET_LEVERAGE", "leverage": int(confirmed_leverage)}],
+        )
     except Exception as e:
         append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "TESTNET_SET_LEVERAGE_FAILED", "error": str(e)}])
+        append_jsonl(
+            events_path,
+            [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": float(initial_capital), "reason": "SET_LEVERAGE_FAILED"}],
+        )
+        return 0
 
     had_state_db = bool(db_path.exists())
     had_state_json = bool(state_path.exists())
@@ -374,7 +391,7 @@ async def run_live_testnet(
             store=store,
             state=state,
             symbol=symbol,
-            leverage=float(leverage),
+            leverage=float(int(leverage)),
             position_size=float(position_size),
             initial_capital=float(initial_capital),
             slippage_bps=float(slippage_bps),
@@ -700,3 +717,4 @@ async def run_live_testnet(
             )
 
         return 0
+
