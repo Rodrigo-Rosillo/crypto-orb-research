@@ -13,7 +13,7 @@ class OpenPositionState:
     qty: float
     entry_price: float
     entry_time_utc: str
-    entry_order_id: int
+    entry_order_id: Optional[int]
     tp_order_id: Optional[int] = None
     sl_order_id: Optional[int] = None
     tp_price: Optional[float] = None

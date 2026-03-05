@@ -7,8 +7,10 @@ from typing import Any
 import pytest
 
 from forward.testnet_broker import (
+    AmbiguousOrderError,
     BinanceFuturesTestnetBroker,
     OrderValidationError,
+    TestnetAPIError,
     floor_to_step,
     format_decimal,
 )
@@ -48,6 +50,8 @@ def _stub_broker(
         min_notional=Decimal(min_notional) if min_notional is not None else None,
         min_notional_filter_type="MIN_NOTIONAL" if min_notional is not None else None,
     )
+    broker._last_quantization = {}
+    broker._client_order_seq = 0
     return broker
 
 
@@ -154,3 +158,136 @@ def test_get_algo_open_orders_wires_expected_endpoint() -> None:
     assert observed["path"] == "/fapi/v1/algoOpenOrders"
     assert observed["params"] == {"symbol": "SOLUSDT"}
     assert observed["signed"] is True
+
+
+def test_place_market_order_sends_new_client_order_id() -> None:
+    broker = _stub_broker(min_notional=None)
+
+    observed: dict[str, Any] = {}
+
+    def _fake_request(method: str, path: str, *, params=None, signed=False, timeout: float = 10.0):
+        observed["method"] = method
+        observed["path"] = path
+        observed["params"] = dict(params or {})
+        observed["signed"] = signed
+        return {"orderId": 321, "status": "FILLED", "avgPrice": "100", "executedQty": "1"}
+
+    broker._request = _fake_request  # type: ignore[method-assign]
+
+    out = broker.place_market_order(symbol="SOLUSDT", side="BUY", quantity=1.0, reference_price=100.0)
+    assert out["orderId"] == 321
+    assert observed["method"] == "POST"
+    assert observed["path"] == "/fapi/v1/order"
+    assert observed["signed"] is True
+    assert observed["params"]["newOrderRespType"] == "RESULT"
+    assert isinstance(observed["params"]["newClientOrderId"], str)
+    assert 1 <= len(observed["params"]["newClientOrderId"]) <= 36
+
+
+def test_place_algo_orders_send_client_algo_ids() -> None:
+    broker = _stub_broker(min_notional=None)
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request(method: str, path: str, *, params=None, signed=False, timeout: float = 10.0):
+        calls.append(
+            {
+                "method": method,
+                "path": path,
+                "params": dict(params or {}),
+                "signed": signed,
+            }
+        )
+        return {"algoId": 123, "status": "NEW"}
+
+    broker._request = _fake_request  # type: ignore[method-assign]
+
+    broker.place_take_profit_market(symbol="SOLUSDT", side="SELL", quantity=1.0, stop_price=101.0)
+    broker.place_stop_market(symbol="SOLUSDT", side="SELL", quantity=1.0, stop_price=99.0)
+
+    assert len(calls) == 2
+    assert all(call["path"] == "/fapi/v1/algoOrder" for call in calls)
+    assert all(call["signed"] is True for call in calls)
+    assert all(isinstance(call["params"].get("clientAlgoId"), str) for call in calls)
+    assert all(1 <= len(str(call["params"]["clientAlgoId"])) <= 36 for call in calls)
+
+
+def test_get_order_accepts_orig_client_order_id() -> None:
+    broker = object.__new__(BinanceFuturesTestnetBroker)
+
+    observed: dict[str, Any] = {}
+
+    def _fake_request(method: str, path: str, *, params=None, signed=False, timeout: float = 10.0):
+        observed["method"] = method
+        observed["path"] = path
+        observed["params"] = dict(params or {})
+        observed["signed"] = signed
+        return {"orderId": 4321, "status": "FILLED"}
+
+    broker._request = _fake_request  # type: ignore[method-assign]
+
+    out = broker.get_order(symbol="SOLUSDT", client_order_id="cid-1")
+    assert out["orderId"] == 4321
+    assert observed["method"] == "GET"
+    assert observed["path"] == "/fapi/v1/order"
+    assert observed["params"] == {"symbol": "SOLUSDT", "origClientOrderId": "cid-1"}
+    assert observed["signed"] is True
+
+
+def test_place_market_order_recovers_duplicate_client_order_id_via_lookup() -> None:
+    broker = _stub_broker(min_notional=None)
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request(method: str, path: str, *, params=None, signed=False, timeout: float = 10.0):
+        calls.append({"method": method, "path": path, "params": dict(params or {}), "signed": signed})
+        if method == "POST":
+            raise TestnetAPIError(
+                "Binance API error HTTP 400 code=-4116 msg=client order id is duplicated",
+                status_code=400,
+                payload={"code": -4116, "msg": "client order id is duplicated"},
+            )
+        return {"orderId": 777, "status": "FILLED", "avgPrice": "100", "executedQty": "1"}
+
+    broker._request = _fake_request  # type: ignore[method-assign]
+
+    out = broker.place_market_order(
+        symbol="SOLUSDT",
+        side="BUY",
+        quantity=1.0,
+        reference_price=100.0,
+        client_order_id="cid-lookup",
+    )
+    assert out["orderId"] == 777
+    assert calls[0]["params"]["newClientOrderId"] == "cid-lookup"
+    assert calls[1]["params"]["origClientOrderId"] == "cid-lookup"
+
+
+def test_place_market_order_raises_ambiguous_when_lookup_fails() -> None:
+    broker = _stub_broker(min_notional=None)
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request(method: str, path: str, *, params=None, signed=False, timeout: float = 10.0):
+        calls.append({"method": method, "path": path, "params": dict(params or {}), "signed": signed})
+        if method == "POST":
+            raise TestnetAPIError("Network error after retries: timeout")
+        raise TestnetAPIError(
+            "Binance API error HTTP 400 code=-2013 msg=Order does not exist.",
+            status_code=400,
+            payload={"code": -2013, "msg": "Order does not exist."},
+        )
+
+    broker._request = _fake_request  # type: ignore[method-assign]
+
+    with pytest.raises(AmbiguousOrderError) as excinfo:
+        broker.place_market_order(
+            symbol="SOLUSDT",
+            side="BUY",
+            quantity=1.0,
+            reference_price=100.0,
+            client_order_id="cid-missing",
+        )
+
+    err = excinfo.value
+    assert err.client_order_id == "cid-missing"
+    assert err.context["lookup_error"] != ""
+    assert calls[0]["params"]["newClientOrderId"] == "cid-missing"
+    assert calls[1]["params"]["origClientOrderId"] == "cid-missing"

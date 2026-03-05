@@ -54,6 +54,26 @@ def _count_trade_log_events(db_path: Path, event_type: str) -> int:
         conn.close()
 
 
+def _latest_trade_log_row(db_path: Path, event_type: str) -> dict[str, object]:
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT event_type, symbol, side, qty, price, realized_pnl, fee, funding_applied, reason, bar_time_utc
+            FROM trade_log
+            WHERE event_type = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (str(event_type),),
+        ).fetchone()
+        assert row is not None
+        return dict(row)
+    finally:
+        conn.close()
+
+
 def test_order_partial_fill_then_full_fill_records_once(tmp_path: Path) -> None:
     db_path = tmp_path / "state.db"
     with SQLiteStateStore(db_path=db_path) as store:
@@ -127,6 +147,99 @@ def test_order_rejection_increments_reject_counter_and_logs(tmp_path: Path) -> N
         assert loaded.open_position is None
 
     assert _count_trade_log_events(db_path, "REJECT") == 1
+
+
+def test_ambiguous_entry_recovers_from_exchange_position_without_reject(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(
+            entry_raise_ambiguous=True,
+            ambiguous_entry_lands=True,
+            fill_price=100.0,
+        )
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        emitted: list[dict[str, object]] = []
+        trader.emit_event = lambda rows: emitted.extend(rows)  # type: ignore[assignment]
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.order_rejects_today == 0
+        assert loaded.open_position is not None
+        assert loaded.open_position.entry_order_id is None
+        assert loaded.open_position.qty == pytest.approx(1.0, abs=1e-12)
+        assert loaded.open_position.entry_price == pytest.approx(100.0, abs=1e-12)
+        assert loaded.open_position.tp_order_id is not None
+        assert loaded.open_position.sl_order_id is not None
+        assert trader.stop_event.is_set() is False
+        assert any(str(e.get("type") or "") == "ENTRY_AMBIGUOUS_RECOVERED" for e in emitted)
+
+    assert _count_trade_log_events(db_path, "ENTRY") == 1
+    assert _count_trade_log_events(db_path, "REJECT") == 0
+
+
+def test_ambiguous_entry_flattens_and_kills_without_reject_count(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(
+            entry_raise_ambiguous=True,
+            ambiguous_entry_lands=True,
+            ambiguous_entry_entry_price=0.0,
+            fill_price=100.0,
+        )
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        emitted: list[dict[str, object]] = []
+        appended: list[tuple[Path, list[dict[str, object]], list[str], str]] = []
+        trader.emit_event = lambda rows: emitted.extend(rows)  # type: ignore[assignment]
+        trader.append_rows = lambda path, rows, cols, name: appended.append((path, rows, cols, name))  # type: ignore[assignment]
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.order_rejects_today == 0
+        assert loaded.open_position is None
+        assert trader.stop_event.is_set() is True
+        assert trader.skip_cancel_open_orders_on_exit_runtime is False
+        assert broker._position_amt == pytest.approx(0.0, abs=1e-12)
+        assert any(str(e.get("type") or "") == "ENTRY_AMBIGUOUS" for e in emitted)
+
+        unknown_rows = [
+            row_item
+            for _, rows, cols, name in appended
+            if name == "orders.csv" and cols == ORDERS_COLUMNS
+            for row_item in rows
+            if str(row_item.get("status") or "") == "unknown"
+            and str(row_item.get("status_detail") or "") == "entry_ambiguous"
+        ]
+        assert len(unknown_rows) == 1
+
+    assert _count_trade_log_events(db_path, "REJECT") == 0
+    kill_row = _latest_trade_log_row(db_path, "KILL_SWITCH")
+    assert "KILL_SWITCH_ENTRY_AMBIGUOUS" in str(kill_row.get("reason") or "")
 
 
 

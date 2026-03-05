@@ -13,7 +13,7 @@ from backtester.risk import RiskLimits
 from forward.risk_engine import RiskDecision, check_margin_ratio, check_order_rejects
 from forward.schemas import FILLS_COLUMNS, ORDERS_COLUMNS, POSITIONS_COLUMNS
 from forward.state_store_sqlite import OpenPositionState, RunnerState, SQLiteStateStore
-from forward.testnet_broker import BinanceFuturesTestnetBroker, OrderValidationError, TestnetAPIError
+from forward.testnet_broker import AmbiguousOrderError, BinanceFuturesTestnetBroker, OrderValidationError, TestnetAPIError
 
 
 def _utcnow_iso() -> str:
@@ -73,6 +73,8 @@ def _order_exec_qty(resp: Any) -> float:
 PROTECTION_RECENCY_WINDOW_SECONDS = 180
 PROTECTION_AMBIGUITY_RETRY_WINDOW_SECONDS = 30
 PROTECTION_PRICE_TOL_TICKS = 1
+ENTRY_AMBIGUITY_VERIFY_ATTEMPTS = 3
+ENTRY_AMBIGUITY_VERIFY_SLEEP_SECONDS = 0.5
 
 def _compact_json(data: Any) -> str:
     try:
@@ -357,6 +359,12 @@ class TraderService:
                 pass
         # Local time fallback is acceptable here because recency matching allows drift.
         return float(time.time()), "local_fallback"
+
+    def _make_submission_client_id(self, prefix: str) -> str:
+        clean = "".join(ch for ch in str(prefix or "").lower() if ch.isalnum())[:8] or "ord"
+        run_token = "".join(ch for ch in str(self.run_id or "").lower() if ch.isalnum())[:8]
+        token = f"{clean}_{run_token}_{time.time_ns():x}" if run_token else f"{clean}_{time.time_ns():x}"
+        return token[:36]
 
     @staticmethod
     def _is_terminal_algo_status(status: str) -> bool:
@@ -865,7 +873,7 @@ class TraderService:
         )
         return False, "position_not_flat_after_flatten"
 
-    def _trigger_protection_kill_switch(self, reason: str, detail: str) -> None:
+    def _trigger_kill_switch(self, reason: str, detail: str) -> None:
         self.emit_event(
             [
                 {
@@ -888,7 +896,127 @@ class TraderService:
             bar_time_utc=_utcnow_iso(),
         )
         self.stop_event.set()
-    
+
+    def _trigger_protection_kill_switch(self, reason: str, detail: str) -> None:
+        self._trigger_kill_switch(reason, detail)
+
+    async def _recover_ambiguous_entry(
+        self,
+        *,
+        error: AmbiguousOrderError,
+        signal_type: str,
+        pos_side: str,
+        qty_sent: float,
+    ) -> Optional[dict[str, Any]]:
+        attempts: list[dict[str, Any]] = []
+        final_side = "FLAT"
+        final_qty = 0.0
+        final_entry_price = 0.0
+
+        for attempt in range(int(ENTRY_AMBIGUITY_VERIFY_ATTEMPTS)):
+            if attempt > 0:
+                await asyncio.sleep(float(ENTRY_AMBIGUITY_VERIFY_SLEEP_SECONDS))
+            try:
+                ex_side, ex_qty, ex_entry, _ = self.fetch_exchange_position()
+            except Exception as fetch_err:
+                attempts.append({"attempt": int(attempt + 1), "error": str(fetch_err)})
+                continue
+
+            final_side = str(ex_side)
+            final_qty = float(ex_qty)
+            final_entry_price = float(ex_entry)
+            attempts.append(
+                {
+                    "attempt": int(attempt + 1),
+                    "side": str(ex_side),
+                    "qty": float(ex_qty),
+                    "entry_price": float(ex_entry),
+                }
+            )
+            if final_side == str(pos_side) and final_qty > 1e-9 and final_entry_price > 0:
+                self.emit_event(
+                    [
+                        {
+                            "ts": _utcnow_iso(),
+                            "type": "ENTRY_AMBIGUOUS_RECOVERED",
+                            "client_order_id": str(error.client_order_id),
+                            "reason": "exchange_position_matched",
+                            "details": {
+                                "attempts": attempts,
+                                "context": dict(error.context or {}),
+                            },
+                        }
+                    ]
+                )
+                return {
+                    "status": "FILLED",
+                    "avgPrice": f"{float(final_entry_price)}",
+                    "executedQty": f"{float(final_qty)}",
+                    "origQty": f"{float(final_qty)}",
+                }
+
+        ambiguous_reason = f"{error}; client_order_id={error.client_order_id}"
+        if error.context:
+            ambiguous_reason = f"{ambiguous_reason}; context={_compact_json(error.context)}"
+
+        self.emit_event(
+            [
+                {
+                    "ts": _utcnow_iso(),
+                    "type": "ENTRY_AMBIGUOUS",
+                    "error": str(error),
+                    "client_order_id": str(error.client_order_id),
+                    "details": {
+                        "attempts": attempts,
+                        "context": dict(error.context or {}),
+                    },
+                }
+            ]
+        )
+        self.append_rows(
+            self.orders_path,
+            [
+                {
+                    "timestamp_utc": _utcnow_iso(),
+                    "due_timestamp_utc": "",
+                    "order_id": "",
+                    "symbol": self.symbol,
+                    "side": pos_side,
+                    "qty": float(qty_sent),
+                    "order_type": "MARKET",
+                    "limit_price": "",
+                    "status": "unknown",
+                    "status_detail": "entry_ambiguous",
+                    "reason": ambiguous_reason if signal_type == "" else f"{signal_type}; {ambiguous_reason}",
+                }
+            ],
+            ORDERS_COLUMNS,
+            "orders.csv",
+        )
+
+        flatten_ok = True
+        flatten_detail = "already_flat"
+        if final_side != "FLAT" and final_qty > 1e-9:
+            flatten_ok, flatten_detail = self._emergency_flatten(
+                reason="entry_ambiguous",
+                known_qty=float(final_qty),
+                known_side=str(final_side),
+            )
+        else:
+            flatten_ok, flatten_detail = self._emergency_flatten(reason="entry_ambiguous")
+
+        self.state.open_position = None
+        self.persist_state()
+        if not flatten_ok:
+            self.skip_cancel_open_orders_on_exit_runtime = True
+
+        self._trigger_kill_switch(
+            "KILL_SWITCH_ENTRY_AMBIGUOUS",
+            f"client_order_id={error.client_order_id}; final_side={final_side}; final_qty={final_qty}; "
+            f"final_entry_price={final_entry_price}; flatten={flatten_detail}",
+        )
+        return None
+
     async def maybe_place_trade_from_signal(self, bar_open_time: pd.Timestamp, row: pd.Series) -> None:
         if self.state.open_position is not None:
             return
@@ -1035,6 +1163,7 @@ class TraderService:
 
         qty_sent = float(qty)
         qty_quant_meta: dict[str, Any] = {}
+        entry_resp: Any = None
         try:
             if hasattr(self.broker, "quantize_qty"):
                 qty_sent_str, qty_quant_meta = self.broker.quantize_qty(
@@ -1065,9 +1194,19 @@ class TraderService:
                     quantity=qty_sent,
                     reduce_only=False,
                     reference_price=float(price),
+                    client_order_id=self._make_submission_client_id("entry"),
                 )
             else:
                 entry_resp = self.broker.place_market_order(symbol=self.symbol, side=side, quantity=qty_sent, reduce_only=False)
+        except AmbiguousOrderError as e:
+            entry_resp = await self._recover_ambiguous_entry(
+                error=e,
+                signal_type=signal_type,
+                pos_side=pos_side,
+                qty_sent=float(qty_sent),
+            )
+            if entry_resp is None:
+                return
         except (OrderValidationError, TestnetAPIError, Exception) as e:
             reject_quantization = {}
             if isinstance(e, OrderValidationError):
@@ -1277,6 +1416,8 @@ class TraderService:
 
         tp_oid = None
         sl_oid = None
+        tp_client_algo_id = self._make_submission_client_id("tp")
+        sl_client_algo_id = self._make_submission_client_id("sl")
         try:
             if isinstance(self.broker, BinanceFuturesTestnetBroker):
                 tp_resp = self.broker.place_take_profit_market(
@@ -1286,6 +1427,7 @@ class TraderService:
                     stop_price=float(tp_price),
                     reduce_only=True,
                     reference_price=float(tp_price),
+                    client_algo_id=str(tp_client_algo_id),
                 )
             else:
                 tp_resp = self.broker.place_take_profit_market(
@@ -1313,6 +1455,7 @@ class TraderService:
                     stop_price=float(sl_price),
                     reduce_only=True,
                     reference_price=float(sl_price),
+                    client_algo_id=str(sl_client_algo_id),
                 )
             else:
                 sl_resp = self.broker.place_stop_market(
@@ -1398,7 +1541,7 @@ class TraderService:
                 qty=float(entry_qty),
                 entry_price=float(entry_price),
                 entry_time_utc=bar_open_time.tz_convert("UTC").isoformat(),
-                entry_order_id=int(entry_oid or 0),
+                entry_order_id=int(entry_oid) if entry_oid is not None else None,
                 tp_order_id=int(protection.get("tp_order_id")) if protection.get("tp_order_id") is not None else None,
                 sl_order_id=int(protection.get("sl_order_id")) if protection.get("sl_order_id") is not None else None,
                 tp_price=float(tp_sent_price),

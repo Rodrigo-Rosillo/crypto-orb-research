@@ -33,6 +33,15 @@ class OrderValidationError(ValueError):
         self.meta = meta or {}
 
 
+class AmbiguousOrderError(RuntimeError):
+    """Raised when exchange-side execution may have happened but could not be proven locally."""
+
+    def __init__(self, message: str, *, client_order_id: str, context: Optional[dict[str, Any]] = None):
+        super().__init__(message)
+        self.client_order_id = str(client_order_id)
+        self.context = context or {}
+
+
 @dataclass
 class RateLimitConfig:
     max_retries: int = 6
@@ -111,6 +120,18 @@ def _safe_decimal(value: Any, default: Decimal = Decimal("0")) -> Decimal:
         return default
 
 
+def _payload_code(payload: Any) -> Optional[int]:
+    if not isinstance(payload, dict):
+        return None
+    code = payload.get("code")
+    if code is None:
+        return None
+    try:
+        return int(code)
+    except Exception:
+        return None
+
+
 @dataclass(frozen=True)
 class _QtyFilter:
     min_qty: Decimal
@@ -173,6 +194,7 @@ class BinanceFuturesTestnetBroker:
         self._exchange_info_cached_at: float = 0.0
         self._symbol_filters_cache: dict[str, _SymbolFilters] = {}
         self._last_quantization: dict[str, Any] = {}
+        self._client_order_seq: int = 0
 
     # -------------------------
     # Core request machinery
@@ -270,6 +292,31 @@ class BinanceFuturesTestnetBroker:
     def _sleep_backoff(seconds: float) -> None:
         jitter = random.random() * 0.1
         time.sleep(max(0.0, float(seconds) + jitter))
+
+    def _make_client_id(self, prefix: str) -> str:
+        clean = "".join(ch for ch in str(prefix or "").lower() if ch.isalnum())[:8] or "ord"
+        self._client_order_seq = int(getattr(self, "_client_order_seq", 0)) + 1
+        token = f"{clean}_{_now_ms():x}_{self._client_order_seq:x}_{random.getrandbits(16):04x}"
+        return token[:36]
+
+    @staticmethod
+    def _is_ambiguous_submit_error(error: TestnetAPIError) -> bool:
+        code = _payload_code(getattr(error, "payload", None))
+        if code in (-1006, -1007, -4116):
+            return True
+        try:
+            if error.status_code is not None and int(error.status_code) >= 500:
+                return True
+        except Exception:
+            pass
+        msg = str(error).lower()
+        if "network error after retries" in msg:
+            return True
+        if "execution status unknown" in msg:
+            return True
+        if "unknown error" in msg and "check your request" in msg:
+            return True
+        return False
 
     def _exchange_info(self) -> dict[str, Any]:
         ttl = max(1, int(getattr(self.cfg, "exchange_info_ttl_seconds", 900) or 900))
@@ -502,6 +549,7 @@ class BinanceFuturesTestnetBroker:
         quantity: float,
         reduce_only: bool = False,
         reference_price: Optional[float] = None,
+        client_order_id: Optional[str] = None,
     ) -> Any:
         ref_price: Optional[Any] = reference_price
         if ref_price is None and not bool(reduce_only):
@@ -524,10 +572,41 @@ class BinanceFuturesTestnetBroker:
             "type": "MARKET",
             "quantity": qty_sent,
             "newOrderRespType": "RESULT",
+            "newClientOrderId": str(client_order_id or self._make_client_id("mkt")),
         }
         if reduce_only:
             params["reduceOnly"] = "true"
-        return self._request("POST", "/fapi/v1/order", params=params, signed=True)
+        try:
+            return self._request("POST", "/fapi/v1/order", params=params, signed=True)
+        except TestnetAPIError as e:
+            if not self._is_ambiguous_submit_error(e):
+                raise
+            lookup_error: Optional[str] = None
+            try:
+                recovered = self.get_order(symbol=symbol, client_order_id=str(params["newClientOrderId"]))
+            except Exception as lookup_exc:
+                lookup_error = str(lookup_exc)
+            else:
+                if isinstance(recovered, dict) and (
+                    recovered.get("orderId") is not None
+                    or recovered.get("clientOrderId") is not None
+                    or recovered.get("origClientOrderId") is not None
+                ):
+                    return recovered
+            raise AmbiguousOrderError(
+                "Market order submission result is ambiguous",
+                client_order_id=str(params["newClientOrderId"]),
+                context={
+                    "symbol": str(symbol).upper(),
+                    "side": str(side).upper(),
+                    "quantity": str(qty_sent),
+                    "reduce_only": bool(reduce_only),
+                    "submit_error": str(e),
+                    "submit_status_code": getattr(e, "status_code", None),
+                    "submit_payload": dict(getattr(e, "payload", {}) or {}),
+                    "lookup_error": lookup_error,
+                },
+            ) from e
 
     # ---- Conditional (Algo) Orders ----
 
@@ -540,6 +619,7 @@ class BinanceFuturesTestnetBroker:
         stop_price: float,
         reduce_only: bool = True,
         reference_price: Optional[float] = None,
+        client_algo_id: Optional[str] = None,
     ) -> Any:
         # NOTE: Binance routes STOP_MARKET via algoOrder endpoint.
         # In our single-position runner, safest is Close-All for protective orders.
@@ -553,6 +633,7 @@ class BinanceFuturesTestnetBroker:
             "triggerPrice": stop_sent,
             "workingType": "MARK_PRICE",
             "newOrderRespType": "RESULT",
+            "clientAlgoId": str(client_algo_id or self._make_client_id("sl")),
         }
         if reduce_only:
             params["closePosition"] = "true"
@@ -583,6 +664,7 @@ class BinanceFuturesTestnetBroker:
         stop_price: float,
         reduce_only: bool = True,
         reference_price: Optional[float] = None,
+        client_algo_id: Optional[str] = None,
     ) -> Any:
         stop_sent, stop_meta = self.quantize_price(symbol=symbol, price=stop_price, field_name="triggerPrice")
         fields: dict[str, Any] = {"triggerPrice": stop_meta}
@@ -594,6 +676,7 @@ class BinanceFuturesTestnetBroker:
             "triggerPrice": stop_sent,
             "workingType": "MARK_PRICE",
             "newOrderRespType": "RESULT",
+            "clientAlgoId": str(client_algo_id or self._make_client_id("tp")),
         }
         if reduce_only:
             params["closePosition"] = "true"
@@ -649,11 +732,18 @@ class BinanceFuturesTestnetBroker:
 
     # ---- Regular Orders ----
 
-    def get_order(self, *, symbol: str, order_id: int) -> Any:
+    def get_order(self, *, symbol: str, order_id: Optional[int] = None, client_order_id: Optional[str] = None) -> Any:
+        if order_id is None and not client_order_id:
+            raise ValueError("get_order requires order_id or client_order_id")
+        params: Dict[str, Any] = {"symbol": symbol}
+        if order_id is not None:
+            params["orderId"] = int(order_id)
+        if client_order_id:
+            params["origClientOrderId"] = str(client_order_id)
         return self._request(
             "GET",
             "/fapi/v1/order",
-            params={"symbol": symbol, "orderId": int(order_id)},
+            params=params,
             signed=True,
         )
 

@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from backtester.risk import RiskLimits
 from forward.state_store_sqlite import RunnerState, SQLiteStateStore
-from forward.testnet_broker import TestnetAPIError
+from forward.testnet_broker import AmbiguousOrderError, TestnetAPIError
 from forward.trader_service import TraderService
 
 
@@ -24,6 +24,9 @@ class FakeBinanceClient:
         reject_flatten: bool = False,
         tp_raise_but_land: bool = False,
         sl_raise_but_land: bool = False,
+        entry_raise_ambiguous: bool = False,
+        ambiguous_entry_lands: bool = False,
+        ambiguous_entry_entry_price: Optional[float] = None,
         open_algo_orders_override: Optional[Any] = None,
         fail_get_algo_open_orders: bool = False,
         server_time_payload: Optional[dict[str, Any]] = None,
@@ -37,6 +40,9 @@ class FakeBinanceClient:
         self.reject_flatten = bool(reject_flatten)
         self.tp_raise_but_land = bool(tp_raise_but_land)
         self.sl_raise_but_land = bool(sl_raise_but_land)
+        self.entry_raise_ambiguous = bool(entry_raise_ambiguous)
+        self.ambiguous_entry_lands = bool(ambiguous_entry_lands)
+        self.ambiguous_entry_entry_price = ambiguous_entry_entry_price
         self.open_algo_orders_override = open_algo_orders_override
         self.fail_get_algo_open_orders = bool(fail_get_algo_open_orders)
         self.server_time_payload = server_time_payload
@@ -56,6 +62,9 @@ class FakeBinanceClient:
         self._entry_status_script: dict[int, list[dict[str, Any]]] = {}
         self._entry_status_idx: dict[int, int] = {}
         self.last_entry_order_id: Optional[int] = None
+        self.last_entry_client_order_id: Optional[str] = None
+        self.last_tp_client_algo_id: Optional[str] = None
+        self.last_sl_client_algo_id: Optional[str] = None
 
     def _new_id(self) -> int:
         self._next_id += 1
@@ -75,7 +84,17 @@ class FakeBinanceClient:
             "tickSize": "0.1",
         }
 
-    def place_market_order(self, *, symbol: str, side: str, quantity: float, reduce_only: bool = False) -> Any:
+    def place_market_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        quantity: float,
+        reduce_only: bool = False,
+        reference_price: float | None = None,
+        client_order_id: str | None = None,
+    ) -> Any:
+        _ = reference_price
         if self.reject_entry and not bool(reduce_only):
             raise TestnetAPIError("simulated_rejection", status_code=400, payload={"code": -2010})
         if self.reject_flatten and bool(reduce_only):
@@ -86,6 +105,7 @@ class FakeBinanceClient:
         s = str(side).upper()
         if not bool(reduce_only):
             self.last_entry_order_id = int(oid)
+            self.last_entry_client_order_id = str(client_order_id or f"entry_{int(oid)}")
 
         if s == "BUY":
             self._position_amt += qty
@@ -96,7 +116,23 @@ class FakeBinanceClient:
             self._position_amt = 0.0
             self._entry_price = 0.0
         elif not bool(reduce_only):
-            self._entry_price = float(self.fill_price)
+            if self.ambiguous_entry_entry_price is not None and self.entry_raise_ambiguous:
+                self._entry_price = float(self.ambiguous_entry_entry_price)
+            else:
+                self._entry_price = float(self.fill_price)
+
+        if self.entry_raise_ambiguous and not bool(reduce_only):
+            if not self.ambiguous_entry_lands:
+                if s == "BUY":
+                    self._position_amt -= qty
+                elif s == "SELL":
+                    self._position_amt += qty
+                self._entry_price = 0.0
+            raise AmbiguousOrderError(
+                "simulated_entry_ambiguous",
+                client_order_id=str(self.last_entry_client_order_id or client_order_id or f"entry_{int(oid)}"),
+                context={"source": "FakeBinanceClient"},
+            )
 
         if self.simulate_partial_fill_poll and not bool(reduce_only):
             half = qty / 2.0
@@ -149,7 +185,9 @@ class FakeBinanceClient:
         quantity: float,
         stop_price: float,
         reduce_only: bool = True,
+        client_algo_id: str | None = None,
     ) -> Any:
+        self.last_tp_client_algo_id = str(client_algo_id) if client_algo_id is not None else None
         algo_id = self._new_id()
         row = {
             "algoId": int(algo_id),
@@ -178,7 +216,9 @@ class FakeBinanceClient:
         quantity: float,
         stop_price: float,
         reduce_only: bool = True,
+        client_algo_id: str | None = None,
     ) -> Any:
+        self.last_sl_client_algo_id = str(client_algo_id) if client_algo_id is not None else None
         algo_id = self._new_id()
         row = {
             "algoId": int(algo_id),
