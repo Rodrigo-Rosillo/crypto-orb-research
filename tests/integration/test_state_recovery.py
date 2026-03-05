@@ -16,6 +16,7 @@ import pytest
 
 from forward.binance_live import LiveBar
 from forward.data_service import DataService
+from forward.schemas import ORDERS_COLUMNS
 from forward.state_store_sqlite import SQLiteStateStore
 from tests.integration.mocks import FakeBinanceClient, build_trader_service
 
