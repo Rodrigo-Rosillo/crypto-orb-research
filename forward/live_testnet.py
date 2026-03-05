@@ -436,9 +436,13 @@ async def run_live_testnet(
             _emit_runtime_event("RECON_MISMATCH", stage=stage, **payload)
 
             if bool(flatten_on_mismatch) and bool(result.get("flatten_on_mismatch")):
-                snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else {}
-                ex_side = str(snapshot.get("side") or "")
-                ex_qty = float(snapshot.get("qty") or 0.0)
+                raw_snapshot = result.get("snapshot")
+                if isinstance(raw_snapshot, dict):
+                    ex_side = str(raw_snapshot.get("side") or "")
+                    ex_qty = float(raw_snapshot.get("qty") or 0.0)
+                else:
+                    ex_side = ""
+                    ex_qty = 0.0
                 try:
                     side = "SELL" if ex_side == "LONG" else "BUY"
                     broker.place_market_order(symbol=symbol, side=side, quantity=ex_qty, reduce_only=True)
