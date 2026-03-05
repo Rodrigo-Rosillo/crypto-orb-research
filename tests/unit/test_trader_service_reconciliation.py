@@ -60,6 +60,7 @@ def test_reconciliation_matches_open_position_within_qty_tolerance(tmp_path: Pat
     try:
         trader.state.open_position = _seed_open_position(side="LONG", qty=1.0)
         broker._position_amt = 1.0 + 5e-7
+        broker._entry_price = 100.0
 
         result = trader.classify_exchange_position_reconciliation()
 
@@ -74,6 +75,7 @@ def test_reconciliation_flags_exchange_open_when_local_state_is_flat(tmp_path: P
     store, trader, broker = _build_subject(tmp_path)
     try:
         broker._position_amt = 1.0
+        broker._entry_price = 100.0
 
         result = trader.classify_exchange_position_reconciliation()
 
