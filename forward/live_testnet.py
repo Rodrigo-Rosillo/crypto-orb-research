@@ -410,6 +410,46 @@ async def run_live_testnet(
             emit_event=emit_event,
         )
 
+        def _emit_runtime_event(event_type: str, *, stage: Optional[str] = None, **fields: Any) -> None:
+            event: Dict[str, Any] = {"ts": _utcnow_iso(), "type": str(event_type)}
+            if stage is not None:
+                event["stage"] = str(stage)
+            event.update(fields)
+            append_jsonl(events_path, [event])
+
+        def _persist_state_best_effort() -> None:
+            try:
+                trader_service.persist_state()
+            except Exception as e:
+                append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "STATE_SAVE_FAILED", "error": str(e)}])
+
+        def _handle_reconciliation_result(
+            result: dict[str, Any],
+            *,
+            stage: Optional[str] = None,
+            persist_state_on_stop: bool = False,
+        ) -> Optional[str]:
+            if str(result.get("status") or "") != "mismatch":
+                return None
+
+            payload = dict(result.get("payload") or {})
+            _emit_runtime_event("RECON_MISMATCH", stage=stage, **payload)
+
+            if bool(flatten_on_mismatch) and bool(result.get("flatten_on_mismatch")):
+                snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else {}
+                ex_side = str(snapshot.get("side") or "")
+                ex_qty = float(snapshot.get("qty") or 0.0)
+                try:
+                    side = "SELL" if ex_side == "LONG" else "BUY"
+                    broker.place_market_order(symbol=symbol, side=side, quantity=ex_qty, reduce_only=True)
+                    _emit_runtime_event("RECON_FLATTENED", stage=stage)
+                except Exception as e:
+                    _emit_runtime_event("RECON_FLATTEN_FAILED", stage=stage, error=str(e))
+
+            if persist_state_on_stop:
+                _persist_state_best_effort()
+            return "RECON_MISMATCH"
+
         # Persist an initial state snapshot immediately so state.json exists even if the
         # run stops before the first closed candle arrives (common for short duration runs).
         if state.last_bar_open_time_utc is None and trading_start_ts is not None:
@@ -430,28 +470,11 @@ async def run_live_testnet(
             append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": float(initial_capital), "reason": "TESTNET_POSITION_RISK_FAILED"}])
             return 0
 
-        if state.open_position is None and ex_side != "FLAT":
-            append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "RECON_MISMATCH", "state": "FLAT", "exchange": ex_side, "qty": ex_qty, "entry_price": ex_entry}])
-            if flatten_on_mismatch:
-                try:
-                    side = "SELL" if ex_side == "LONG" else "BUY"
-                    broker.place_market_order(symbol=symbol, side=side, quantity=ex_qty, reduce_only=True)
-                    append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "RECON_FLATTENED"}])
-                except Exception as e:
-                    append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "RECON_FLATTEN_FAILED", "error": str(e)}])
-            append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": float(initial_capital), "reason": "RECON_MISMATCH"}])
+        startup_reconciliation = trader_service.classify_exchange_position_reconciliation((ex_side, ex_qty, ex_entry, ex_upl))
+        startup_reason = _handle_reconciliation_result(startup_reconciliation)
+        if startup_reason is not None:
+            append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": float(initial_capital), "reason": startup_reason}])
             return 0
-
-        if state.open_position is not None and ex_side == "FLAT":
-            append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "RECON_MISMATCH", "state": state.open_position.side, "exchange": "FLAT"}])
-            append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": float(initial_capital), "reason": "RECON_MISMATCH"}])
-            return 0
-
-        if state.open_position is not None and ex_side != "FLAT":
-            if abs(state.open_position.qty - ex_qty) > 1e-6 or state.open_position.side != ex_side:
-                append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "RECON_MISMATCH", "state": state.open_position.to_dict() if hasattr(state.open_position, 'to_dict') else {}, "exchange": {"side": ex_side, "qty": ex_qty}}])
-                append_jsonl(events_path, [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": 0, "final_equity": float(initial_capital), "reason": "RECON_MISMATCH"}])
-                return 0
 
         # Smoke test: place tiny order and optionally flatten
         if smoke_test:
@@ -557,6 +580,17 @@ async def run_live_testnet(
         bars_processed = int(state.bars_processed or 0)
         start_wall = datetime.now(timezone.utc)
         stop_requested = False
+        run_end_reason: Optional[str] = None
+
+        def _persist_bar_progress() -> None:
+            nonlocal bars_processed
+            bars_processed += 1
+            state.bars_processed = int(bars_processed)
+            _persist_state_best_effort()
+            try:
+                _write_heartbeat(heartbeat_path)
+            except Exception as e:
+                print(f"[heartbeat] write failed: {e}", file=sys.stderr)
 
         hb = asyncio.create_task(data_service.heartbeat_task(stop_event))
         hb_writer = asyncio.create_task(
@@ -630,18 +664,36 @@ async def run_live_testnet(
                     continue
 
                 await trader_service.poll_open_orders()
-                trader_service.record_position_snapshot()
+                try:
+                    exchange_position = trader_service.fetch_exchange_position()
+                except Exception as e:
+                    _emit_runtime_event(
+                        "TESTNET_POSITION_RISK_FAILED",
+                        stage="runtime",
+                        error=str(e),
+                        payload=getattr(e, "payload", None),
+                    )
+                    run_end_reason = "TESTNET_POSITION_RISK_FAILED"
+                    _persist_bar_progress()
+                    break
+                trader_service.record_position_snapshot(exchange_position)
+                runtime_reconciliation = trader_service.classify_exchange_position_reconciliation(exchange_position)
+                run_end_reason = _handle_reconciliation_result(
+                    runtime_reconciliation,
+                    stage="runtime",
+                    persist_state_on_stop=False,
+                )
+                if run_end_reason is not None:
+                    _persist_bar_progress()
+                    break
                 trader_service.maybe_kill_on_margin_ratio()
+                if stop_event.is_set():
+                    _persist_bar_progress()
+                    break
 
                 await trader_service.maybe_place_trade_from_signal(bar.open_time, row)
 
-                bars_processed += 1
-                state.bars_processed = int(bars_processed)
-                trader_service.persist_state()
-                try:
-                    _write_heartbeat(heartbeat_path)
-                except Exception as e:
-                    print(f"[heartbeat] write failed: {e}", file=sys.stderr)
+                _persist_bar_progress()
 
                 if stop_requested:
                     continue
@@ -714,7 +766,7 @@ async def run_live_testnet(
 
             append_jsonl(
                 events_path,
-                [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": int(bars_processed), "final_equity": "", "reason": "STOP" if stop_event.is_set() else "END"}],
+                [{"ts": _utcnow_iso(), "type": "LIVE_RUN_END", "bars_processed": int(bars_processed), "final_equity": "", "reason": str(run_end_reason or ("STOP" if stop_event.is_set() else "END"))}],
             )
 
         return 0

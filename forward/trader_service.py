@@ -75,6 +75,7 @@ PROTECTION_AMBIGUITY_RETRY_WINDOW_SECONDS = 30
 PROTECTION_PRICE_TOL_TICKS = 1
 ENTRY_AMBIGUITY_VERIFY_ATTEMPTS = 3
 ENTRY_AMBIGUITY_VERIFY_SLEEP_SECONDS = 0.5
+POSITION_RECON_QTY_TOLERANCE = 1e-6
 
 def _compact_json(data: Any) -> str:
     try:
@@ -143,8 +144,66 @@ class TraderService:
         side = _pos_side_from_amt(amt)
         return side, float(abs(amt)), float(entry), float(upl)
 
-    def record_position_snapshot(self) -> None:
-        ex_side, ex_qty, ex_entry, ex_upl = self.fetch_exchange_position()
+    def classify_exchange_position_reconciliation(
+        self,
+        exchange_position: Optional[Tuple[str, float, float, float]] = None,
+    ) -> dict[str, Any]:
+        ex_side, ex_qty, ex_entry, ex_upl = exchange_position or self.fetch_exchange_position()
+        snapshot = {
+            "side": str(ex_side),
+            "qty": float(ex_qty),
+            "entry_price": float(ex_entry),
+            "unrealized_pnl": float(ex_upl),
+        }
+        op = self.state.open_position
+        if op is None:
+            if ex_side != "FLAT":
+                return {
+                    "status": "mismatch",
+                    "flatten_on_mismatch": True,
+                    "payload": {
+                        "state": "FLAT",
+                        "exchange": str(ex_side),
+                        "qty": float(ex_qty),
+                        "entry_price": float(ex_entry),
+                    },
+                    "snapshot": snapshot,
+                }
+            return {"status": "match", "snapshot": snapshot}
+
+        if ex_side == "FLAT":
+            return {
+                "status": "mismatch",
+                "flatten_on_mismatch": False,
+                "payload": {
+                    "state": str(op.side),
+                    "exchange": "FLAT",
+                },
+                "snapshot": snapshot,
+            }
+
+        if abs(float(op.qty) - float(ex_qty)) > POSITION_RECON_QTY_TOLERANCE or str(op.side) != str(ex_side):
+            state_payload = op.to_dict() if hasattr(op, "to_dict") else {}
+            return {
+                "status": "mismatch",
+                "flatten_on_mismatch": False,
+                "payload": {
+                    "state": state_payload,
+                    "exchange": {
+                        "side": str(ex_side),
+                        "qty": float(ex_qty),
+                    },
+                },
+                "snapshot": snapshot,
+            }
+
+        return {"status": "match", "snapshot": snapshot}
+
+    def record_position_snapshot(
+        self,
+        exchange_position: Optional[Tuple[str, float, float, float]] = None,
+    ) -> None:
+        ex_side, ex_qty, ex_entry, ex_upl = exchange_position or self.fetch_exchange_position()
         self.append_rows(
             self.positions_path,
             [
