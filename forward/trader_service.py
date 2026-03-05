@@ -92,6 +92,7 @@ class TraderService:
         position_size: float,
         initial_capital: float,
         slippage_bps: float,
+        taker_fee_rate: float,
         state_path: Path,
         events_path: Path,
         run_id: str,
@@ -113,6 +114,7 @@ class TraderService:
         self.position_size = float(position_size)
         self.initial_capital = float(initial_capital)
         self.slippage_bps = float(slippage_bps)
+        self.taker_fee_rate = float(taker_fee_rate)
         self.state_path = state_path
         self.events_path = events_path
         self.run_id = run_id
@@ -181,20 +183,83 @@ class TraderService:
                             closed_side = op.side
                             closed_qty = float(op.qty)
                             closed_symbol = op.symbol
+                            exit_price_raw = _order_avg_price(o)
+                            exit_qty_raw = _order_exec_qty(o)
+                            exit_price = float(exit_price_raw)
+                            exit_qty = float(exit_qty_raw)
+
+                            if exit_price <= 0:
+                                exit_price = float(op.entry_price)
+                            if exit_qty <= 0:
+                                exit_qty = float(op.qty)
+
+                            raw_missing = bool(exit_price_raw <= 0 or exit_qty_raw <= 0)
+                            enrich_valid = bool(exit_price > 0 and exit_qty > 0)
+                            if raw_missing and enrich_valid:
+                                self.emit_event(
+                                    [
+                                        {
+                                            "ts": _utcnow_iso(),
+                                            "type": "EXIT_ENRICH_FALLBACK",
+                                            "reason": "avg_price_or_qty_missing",
+                                            "exit_price_raw": float(exit_price_raw),
+                                            "exit_qty_raw": float(exit_qty_raw),
+                                        }
+                                    ]
+                                )
+
                             self.state.open_position = None
-                            self.store.append_trade_log(
-                                event_type="EXIT",
-                                symbol=closed_symbol,
-                                side=closed_side,
-                                qty=closed_qty,
-                                price=None,
-                                realized_pnl=None,
-                                fee=None,
-                                funding_applied=None,
-                                reason=kind,
-                                bar_time_utc=_utcnow_iso(),
-                            )
+                            self.skip_cancel_open_orders_on_exit_runtime = False
+                            if not enrich_valid:
+                                self.emit_event(
+                                    [
+                                        {
+                                            "ts": _utcnow_iso(),
+                                            "type": "EXIT_ENRICH_FAILED",
+                                            "reason": "invalid_price_or_qty",
+                                            "exit_price_raw": float(exit_price_raw),
+                                            "exit_qty_raw": float(exit_qty_raw),
+                                        }
+                                    ]
+                                )
+                                self.store.append_trade_log(
+                                    event_type="EXIT",
+                                    symbol=closed_symbol,
+                                    side=closed_side,
+                                    qty=closed_qty,
+                                    price=None,
+                                    realized_pnl=None,
+                                    fee=None,
+                                    funding_applied=0.0,
+                                    reason=kind,
+                                    bar_time_utc=_utcnow_iso(),
+                                )
+                            else:
+                                # Fee semantics (Option A): realized_pnl is NET of fees.
+                                # EXIT.fee stores the round-trip taker fee for reference only.
+                                # Do not subtract fees again when summing realized_pnl.
+                                entry_notional = float(op.entry_price) * float(op.qty)
+                                exit_notional = float(exit_price) * float(exit_qty)
+                                round_trip_fee = (entry_notional + exit_notional) * float(self.taker_fee_rate)
+                                if str(op.side).upper() == "LONG":
+                                    gross_pnl = (float(exit_price) - float(op.entry_price)) * float(exit_qty)
+                                else:
+                                    gross_pnl = (float(op.entry_price) - float(exit_price)) * float(exit_qty)
+                                realized_pnl = float(gross_pnl - round_trip_fee)
+                                self.store.append_trade_log(
+                                    event_type="EXIT",
+                                    symbol=closed_symbol,
+                                    side=closed_side,
+                                    qty=float(exit_qty),
+                                    price=float(exit_price),
+                                    realized_pnl=float(realized_pnl),
+                                    fee=float(round_trip_fee),
+                                    funding_applied=0.0,
+                                    reason=kind,
+                                    bar_time_utc=_utcnow_iso(),
+                                )
                             changed = True
+                            break
             except Exception as e:
                 self.emit_event([{"ts": _utcnow_iso(), "type": "ORDER_POLL_FAILED", "order_id": int(oid), "error": str(e)}])
         if changed:
@@ -595,6 +660,7 @@ class TraderService:
         close_qty = 0.0
         close_side = ""
         source = "exchange_position"
+        op = self.state.open_position
         known_side_u = str(known_side or "").upper()
 
         if known_qty is not None and float(known_qty) > 1e-9 and known_side_u in ("LONG", "SHORT"):
@@ -698,15 +764,85 @@ class TraderService:
                 ]
             )
             try:
+                exit_price_raw = _order_avg_price(flatten_resp)
+                exit_qty_raw = _order_exec_qty(flatten_resp)
+                exit_price = float(exit_price_raw)
+                exit_qty = float(exit_qty_raw)
+                if exit_price <= 0 and op is not None:
+                    exit_price = float(op.entry_price)
+                if exit_qty <= 0 and op is not None:
+                    exit_qty = float(op.qty)
+
+                raw_missing = bool(exit_price_raw <= 0 or exit_qty_raw <= 0)
+                enrich_valid = bool(op is not None and exit_price > 0 and exit_qty > 0)
+                if raw_missing and enrich_valid:
+                    self.emit_event(
+                        [
+                            {
+                                "ts": _utcnow_iso(),
+                                "type": "EXIT_ENRICH_FALLBACK",
+                                "reason": "avg_price_or_qty_missing",
+                                "context": "emergency_flatten",
+                                "exit_price_raw": float(exit_price_raw),
+                                "exit_qty_raw": float(exit_qty_raw),
+                            }
+                        ]
+                    )
+
+                closed_side = (
+                    str(op.side)
+                    if op is not None
+                    else (known_side_u if known_side_u in ("LONG", "SHORT") else None)
+                )
+                if not enrich_valid:
+                    self.emit_event(
+                        [
+                            {
+                                "ts": _utcnow_iso(),
+                                "type": "EXIT_ENRICH_FAILED",
+                                "reason": "invalid_price_or_qty",
+                                "context": "emergency_flatten",
+                                "exit_price_raw": float(exit_price_raw),
+                                "exit_qty_raw": float(exit_qty_raw),
+                            }
+                        ]
+                    )
+                    self.store.append_trade_log(
+                        event_type="EXIT",
+                        symbol=self.symbol,
+                        side=closed_side,
+                        qty=float(close_qty),
+                        price=None,
+                        realized_pnl=None,
+                        fee=None,
+                        funding_applied=0.0,
+                        reason=f"EMERGENCY_FLATTEN:{reason}",
+                        bar_time_utc=_utcnow_iso(),
+                    )
+                    return True, "flattened"
+
+                assert op is not None
+
+                # Fee semantics (Option A): realized_pnl is NET of fees.
+                # EXIT.fee stores the round-trip taker fee for reference only.
+                # Do not subtract fees again when summing realized_pnl.
+                entry_notional = float(op.entry_price) * float(op.qty)
+                exit_notional = float(exit_price) * float(exit_qty)
+                round_trip_fee = (entry_notional + exit_notional) * float(self.taker_fee_rate)
+                if str(op.side).upper() == "LONG":
+                    gross_pnl = (float(exit_price) - float(op.entry_price)) * float(exit_qty)
+                else:
+                    gross_pnl = (float(op.entry_price) - float(exit_price)) * float(exit_qty)
+                realized_pnl = float(gross_pnl - round_trip_fee)
                 self.store.append_trade_log(
                     event_type="EXIT",
                     symbol=self.symbol,
-                    side=known_side_u if known_side_u in ("LONG", "SHORT") else None,
-                    qty=float(close_qty),
-                    price=None,
-                    realized_pnl=None,
-                    fee=None,
-                    funding_applied=None,
+                    side=closed_side,
+                    qty=float(exit_qty),
+                    price=float(exit_price),
+                    realized_pnl=float(realized_pnl),
+                    fee=float(round_trip_fee),
+                    funding_applied=0.0,
                     reason=f"EMERGENCY_FLATTEN:{reason}",
                     bar_time_utc=_utcnow_iso(),
                 )
@@ -1065,7 +1201,7 @@ class TraderService:
             qty=float(entry_qty),
             price=float(entry_price),
             realized_pnl=None,
-            fee=None,
+            fee=0.0,
             funding_applied=None,
             reason=None,
             bar_time_utc=bar_open_time.tz_convert("UTC").isoformat(),

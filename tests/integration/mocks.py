@@ -268,6 +268,7 @@ def build_trader_service(
     leverage: float = 1.0,
     position_size: float = 0.1,
     initial_capital: float = 1000.0,
+    taker_fee_rate: float = 0.0005,
 ) -> TraderService:
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -287,6 +288,7 @@ def build_trader_service(
         position_size=float(position_size),
         initial_capital=float(initial_capital),
         slippage_bps=0.0,
+        taker_fee_rate=float(taker_fee_rate),
         state_path=work_dir / "state.json",
         events_path=work_dir / "events.jsonl",
         run_id="integration-test",

@@ -95,6 +95,7 @@ def _build_trader_service(*, tmp_path: Path, broker: FakeBroker, store: SQLiteSt
         position_size=0.2,
         initial_capital=1000.0,
         slippage_bps=0.0,
+        taker_fee_rate=0.0005,
         state_path=tmp_path / "state.json",
         events_path=tmp_path / "events.jsonl",
         run_id="unit-test",

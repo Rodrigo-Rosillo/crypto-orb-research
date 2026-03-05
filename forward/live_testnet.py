@@ -395,6 +395,7 @@ async def run_live_testnet(
             position_size=float(position_size),
             initial_capital=float(initial_capital),
             slippage_bps=float(slippage_bps),
+            taker_fee_rate=float(taker_fee_rate),
             state_path=state_path,
             events_path=events_path,
             run_id=str(run_dir.name),
