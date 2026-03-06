@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
@@ -13,7 +14,13 @@ from backtester.risk import RiskLimits
 from forward.risk_engine import RiskDecision, check_margin_ratio, check_order_rejects
 from forward.schemas import FILLS_COLUMNS, ORDERS_COLUMNS, POSITIONS_COLUMNS
 from forward.state_store_sqlite import OpenPositionState, RunnerState, SQLiteStateStore
-from forward.testnet_broker import AmbiguousOrderError, BinanceFuturesTestnetBroker, OrderValidationError, TestnetAPIError
+from forward.testnet_broker import (
+    AmbiguousOrderError,
+    BinanceFuturesTestnetBroker,
+    OrderValidationError,
+    TestnetAPIError,
+    classify_submit_error,
+)
 
 
 def _utcnow_iso() -> str:
@@ -82,6 +89,15 @@ def _compact_json(data: Any) -> str:
         return json.dumps(data, sort_keys=True, separators=(",", ":"))
     except Exception:
         return str(data)
+
+
+@dataclass(frozen=True)
+class EntryFailureDisposition:
+    event_type: str
+    trade_log_event_type: str
+    order_status: str
+    order_status_detail: str
+    increment_rejects: bool
 
 
 class TraderService:
@@ -424,6 +440,158 @@ class TraderService:
         run_token = "".join(ch for ch in str(self.run_id or "").lower() if ch.isalnum())[:8]
         token = f"{clean}_{run_token}_{time.time_ns():x}" if run_token else f"{clean}_{time.time_ns():x}"
         return token[:36]
+
+    def _entry_failure_quantization(
+        self,
+        *,
+        error: Exception,
+        qty_quant_meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        quantization: dict[str, Any] = {}
+        if isinstance(error, OrderValidationError):
+            quantization = {
+                "symbol": self.symbol,
+                "orderType": "MARKET",
+                "fields": {"quantity": dict(error.meta or {})},
+            }
+        if isinstance(self.broker, BinanceFuturesTestnetBroker):
+            last_q = self.broker.get_last_quantization()
+            if isinstance(last_q, dict) and last_q and not quantization:
+                quantization = last_q
+        if not quantization and qty_quant_meta:
+            quantization = {
+                "symbol": self.symbol,
+                "orderType": "MARKET",
+                "fields": {"quantity": dict(qty_quant_meta)},
+            }
+        return quantization
+
+    def _classify_entry_failure(
+        self,
+        *,
+        error: Exception,
+        stage: str,
+    ) -> EntryFailureDisposition:
+        if isinstance(error, OrderValidationError):
+            return EntryFailureDisposition(
+                event_type="ENTRY_REJECTED",
+                trade_log_event_type="REJECT",
+                order_status="rejected",
+                order_status_detail="entry_rejected_local",
+                increment_rejects=True,
+            )
+        if isinstance(error, TestnetAPIError) and stage == "submit":
+            if classify_submit_error(error) == "definitive_reject":
+                return EntryFailureDisposition(
+                    event_type="ENTRY_REJECTED",
+                    trade_log_event_type="REJECT",
+                    order_status="rejected",
+                    order_status_detail="entry_rejected",
+                    increment_rejects=True,
+                )
+        return EntryFailureDisposition(
+            event_type="ENTRY_FAILED",
+            trade_log_event_type="ENTRY_FAILED",
+            order_status="failed",
+            order_status_detail="entry_precheck_failed" if stage == "precheck" else "entry_submit_failed",
+            increment_rejects=False,
+        )
+
+    def _handle_entry_failure(
+        self,
+        *,
+        error: Exception,
+        stage: str,
+        bar_open_time: pd.Timestamp,
+        pos_side: str,
+        qty_sent: float,
+        qty_quant_meta: dict[str, Any],
+    ) -> None:
+        disposition = self._classify_entry_failure(error=error, stage=stage)
+        quantization = self._entry_failure_quantization(error=error, qty_quant_meta=qty_quant_meta)
+        reason = str(error)
+        if quantization:
+            reason = f"{reason}; quantization={_compact_json(quantization)}"
+
+        entry_event: dict[str, Any] = {
+            "ts": _utcnow_iso(),
+            "type": disposition.event_type,
+            "error": str(error),
+        }
+        if disposition.event_type == "ENTRY_FAILED":
+            entry_event["stage"] = str(stage)
+        if quantization:
+            entry_event["quantization"] = quantization
+        self.emit_event([entry_event])
+
+        self.store.append_trade_log(
+            event_type=disposition.trade_log_event_type,
+            symbol=self.symbol,
+            side=pos_side,
+            qty=None,
+            price=None,
+            realized_pnl=None,
+            fee=None,
+            funding_applied=None,
+            reason=reason,
+            bar_time_utc=bar_open_time.tz_convert("UTC").isoformat(),
+        )
+
+        if disposition.increment_rejects:
+            # Reject kill-switch tracks only definitive local or venue rejects.
+            self.state.order_rejects_today = int(self.state.order_rejects_today or 0) + 1
+            reject_result = check_order_rejects(
+                rejects_today=int(self.state.order_rejects_today),
+                max_rejects=int(self.max_order_rejects_per_day),
+            )
+            if reject_result.decision == RiskDecision.KILL_SWITCH:
+                self.emit_event(
+                    [
+                        {
+                            "ts": _utcnow_iso(),
+                            "type": "KILL_SWITCH_ORDER_REJECTS",
+                            "rejects_today": int(self.state.order_rejects_today),
+                            "threshold": int(self.max_order_rejects_per_day),
+                        }
+                    ]
+                )
+                self.store.append_trade_log(
+                    event_type="KILL_SWITCH",
+                    symbol=self.symbol,
+                    side=None,
+                    qty=None,
+                    price=None,
+                    realized_pnl=None,
+                    fee=None,
+                    funding_applied=None,
+                    reason="KILL_SWITCH_ORDER_REJECTS",
+                    bar_time_utc=_utcnow_iso(),
+                )
+                self.stop_event.set()
+
+        self.append_rows(
+            self.orders_path,
+            [
+                {
+                    "timestamp_utc": _utcnow_iso(),
+                    "due_timestamp_utc": "",
+                    "order_id": "",
+                    "symbol": self.symbol,
+                    "side": pos_side,
+                    "qty": float(qty_sent),
+                    "order_type": "MARKET",
+                    "limit_price": "",
+                    "status": disposition.order_status,
+                    "status_detail": disposition.order_status_detail,
+                    "reason": reason,
+                }
+            ],
+            ORDERS_COLUMNS,
+            "orders.csv",
+        )
+
+        if disposition.increment_rejects:
+            self.persist_state()
 
     @staticmethod
     def _is_terminal_algo_status(status: str) -> bool:
@@ -1233,19 +1401,30 @@ class TraderService:
                     enforce_min_notional=True,
                 )
                 qty_sent = _float(qty_sent_str, qty_sent)
+        except Exception as e:
+            self._handle_entry_failure(
+                error=e,
+                stage="precheck",
+                bar_open_time=bar_open_time,
+                pos_side=pos_side,
+                qty_sent=float(qty_sent),
+                qty_quant_meta=qty_quant_meta,
+            )
+            return
 
-            entry_submit_event: dict[str, Any] = {
-                "ts": _utcnow_iso(),
-                "type": "ENTRY_SUBMIT",
-                "signal_type": signal_type,
-                "qty": float(qty),
-                "qty_raw": float(qty),
-                "qty_sent": float(qty_sent),
-                "step_size": str(qty_quant_meta.get("stepSize", "")),
-                "side": pos_side,
-            }
-            self.emit_event([entry_submit_event])
+        entry_submit_event: dict[str, Any] = {
+            "ts": _utcnow_iso(),
+            "type": "ENTRY_SUBMIT",
+            "signal_type": signal_type,
+            "qty": float(qty),
+            "qty_raw": float(qty),
+            "qty_sent": float(qty_sent),
+            "step_size": str(qty_quant_meta.get("stepSize", "")),
+            "side": pos_side,
+        }
+        self.emit_event([entry_submit_event])
 
+        try:
             if isinstance(self.broker, BinanceFuturesTestnetBroker):
                 entry_resp = self.broker.place_market_order(
                     symbol=self.symbol,
@@ -1256,7 +1435,12 @@ class TraderService:
                     client_order_id=self._make_submission_client_id("entry"),
                 )
             else:
-                entry_resp = self.broker.place_market_order(symbol=self.symbol, side=side, quantity=qty_sent, reduce_only=False)
+                entry_resp = self.broker.place_market_order(
+                    symbol=self.symbol,
+                    side=side,
+                    quantity=qty_sent,
+                    reduce_only=False,
+                )
         except AmbiguousOrderError as e:
             entry_resp = await self._recover_ambiguous_entry(
                 error=e,
@@ -1266,87 +1450,15 @@ class TraderService:
             )
             if entry_resp is None:
                 return
-        except (OrderValidationError, TestnetAPIError, Exception) as e:
-            reject_quantization = {}
-            if isinstance(e, OrderValidationError):
-                reject_quantization = {"symbol": self.symbol, "orderType": "MARKET", "fields": {"quantity": dict(e.meta or {})}}
-            if isinstance(self.broker, BinanceFuturesTestnetBroker):
-                last_q = self.broker.get_last_quantization()
-                if isinstance(last_q, dict) and last_q and not reject_quantization:
-                    reject_quantization = last_q
-            if not reject_quantization and qty_quant_meta:
-                reject_quantization = {"symbol": self.symbol, "orderType": "MARKET", "fields": {"quantity": qty_quant_meta}}
-
-            reject_event: dict[str, Any] = {"ts": _utcnow_iso(), "type": "ENTRY_REJECTED", "error": str(e)}
-            if reject_quantization:
-                reject_event["quantization"] = reject_quantization
-            self.emit_event([reject_event])
-
-            reject_reason = str(e)
-            if reject_quantization:
-                reject_reason = f"{reject_reason}; quantization={_compact_json(reject_quantization)}"
-            self.store.append_trade_log(
-                event_type="REJECT",
-                symbol=self.symbol,
-                side=pos_side,
-                qty=None,
-                price=None,
-                realized_pnl=None,
-                fee=None,
-                funding_applied=None,
-                reason=reject_reason,
-                bar_time_utc=bar_open_time.tz_convert("UTC").isoformat(),
+        except Exception as e:
+            self._handle_entry_failure(
+                error=e,
+                stage="submit",
+                bar_open_time=bar_open_time,
+                pos_side=pos_side,
+                qty_sent=float(qty_sent),
+                qty_quant_meta=qty_quant_meta,
             )
-            self.state.order_rejects_today = int(self.state.order_rejects_today or 0) + 1
-            reject_result = check_order_rejects(
-                rejects_today=int(self.state.order_rejects_today),
-                max_rejects=int(self.max_order_rejects_per_day),
-            )
-            if reject_result.decision == RiskDecision.KILL_SWITCH:
-                self.emit_event(
-                    [
-                        {
-                            "ts": _utcnow_iso(),
-                            "type": "KILL_SWITCH_ORDER_REJECTS",
-                            "rejects_today": int(self.state.order_rejects_today),
-                            "threshold": int(self.max_order_rejects_per_day),
-                        }
-                    ]
-                )
-                self.store.append_trade_log(
-                    event_type="KILL_SWITCH",
-                    symbol=self.symbol,
-                    side=None,
-                    qty=None,
-                    price=None,
-                    realized_pnl=None,
-                    fee=None,
-                    funding_applied=None,
-                    reason="KILL_SWITCH_ORDER_REJECTS",
-                    bar_time_utc=_utcnow_iso(),
-                )
-                self.stop_event.set()
-            self.append_rows(
-                self.orders_path,
-                [
-                    {
-                        "timestamp_utc": _utcnow_iso(),
-                        "due_timestamp_utc": "",
-                        "order_id": "",
-                        "symbol": self.symbol,
-                        "side": pos_side,
-                        "qty": float(qty_sent),
-                        "order_type": "MARKET",
-                        "limit_price": "",
-                        "status": "rejected",
-                        "status_detail": "entry_rejected_local" if isinstance(e, OrderValidationError) else "entry_rejected",
-                        "reason": reject_reason,
-                    }
-                ],
-                ORDERS_COLUMNS,
-                "orders.csv",
-            )
-            self.persist_state()
             return
 
         entry_oid = _extract_order_id(entry_resp)

@@ -8,7 +8,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_DOWN
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 import requests
 from urllib.parse import urlencode
@@ -130,6 +130,43 @@ def _payload_code(payload: Any) -> Optional[int]:
         return int(code)
     except Exception:
         return None
+
+
+SubmitErrorKind = Literal["ambiguous", "definitive_reject", "transient_system"]
+
+
+def classify_submit_error(error: TestnetAPIError) -> SubmitErrorKind:
+    if BinanceFuturesTestnetBroker._is_ambiguous_submit_error(error):
+        return "ambiguous"
+
+    code = _payload_code(getattr(error, "payload", None))
+    try:
+        status_code = int(error.status_code) if error.status_code is not None else None
+    except Exception:
+        status_code = None
+
+    if code in (-1003, -1021, -1022, -2014, -2015):
+        return "transient_system"
+    if status_code in (401, 403, 418, 429):
+        return "transient_system"
+    if status_code is not None and status_code >= 500:
+        return "transient_system"
+
+    msg = str(error).lower()
+    for marker in (
+        "rate limit",
+        "too many requests",
+        "api-key",
+        "signature",
+        "recvwindow",
+        "timestamp for this request",
+    ):
+        if marker in msg:
+            return "transient_system"
+
+    if status_code == 400:
+        return "definitive_reject"
+    return "transient_system"
 
 
 @dataclass(frozen=True)
@@ -579,7 +616,7 @@ class BinanceFuturesTestnetBroker:
         try:
             return self._request("POST", "/fapi/v1/order", params=params, signed=True)
         except TestnetAPIError as e:
-            if not self._is_ambiguous_submit_error(e):
+            if classify_submit_error(e) != "ambiguous":
                 raise
             lookup_error: Optional[str] = None
             try:
@@ -607,7 +644,6 @@ class BinanceFuturesTestnetBroker:
                     "lookup_error": lookup_error,
                 },
             ) from e
-
     # ---- Conditional (Algo) Orders ----
 
     def place_stop_market(

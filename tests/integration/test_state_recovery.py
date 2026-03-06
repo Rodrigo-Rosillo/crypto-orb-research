@@ -7,9 +7,11 @@ import sqlite3
 import subprocess
 import sys
 import time
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
+from types import SimpleNamespace
+from typing import Any, AsyncIterator
 
 import pandas as pd
 import pytest
@@ -18,6 +20,7 @@ from forward.binance_live import LiveBar
 from forward.data_service import DataService
 from forward.schemas import ORDERS_COLUMNS
 from forward.state_store_sqlite import SQLiteStateStore
+from forward.testnet_broker import BinanceFuturesTestnetBroker, TestnetAPIError
 from tests.integration.mocks import FakeBinanceClient, build_trader_service
 
 
@@ -42,6 +45,39 @@ def _entry_row_missing_orb() -> pd.Series:
             "orb_high": None,
         }
     )
+
+
+def _stub_testnet_entry_broker() -> BinanceFuturesTestnetBroker:
+    broker = object.__new__(BinanceFuturesTestnetBroker)
+    lot = SimpleNamespace(
+        min_qty=Decimal("0.001"),
+        max_qty=Decimal("1000000"),
+        step_size=Decimal("0.001"),
+        filter_type="LOT_SIZE",
+    )
+    market = SimpleNamespace(
+        min_qty=Decimal("0.001"),
+        max_qty=Decimal("1000000"),
+        step_size=Decimal("0.001"),
+        filter_type="MARKET_LOT_SIZE",
+    )
+    price = SimpleNamespace(
+        min_price=Decimal("0.0001"),
+        max_price=Decimal("1000000"),
+        tick_size=Decimal("0.1"),
+    )
+    broker._symbol_filters = lambda _symbol: SimpleNamespace(  # type: ignore[attr-defined]
+        symbol="SOLUSDT",
+        lot_size=lot,
+        market_lot_size=market,
+        price_filter=price,
+        min_notional=Decimal("5"),
+        min_notional_filter_type="MIN_NOTIONAL",
+    )
+    broker._last_quantization = {}
+    broker._client_order_seq = 0
+    broker.account = lambda: {"availableBalance": "1000", "totalMarginBalance": "1000"}
+    return broker
 
 def _count_trade_log_events(db_path: Path, event_type: str) -> int:
     conn = sqlite3.connect(str(db_path))
@@ -148,6 +184,167 @@ def test_order_rejection_increments_reject_counter_and_logs(tmp_path: Path) -> N
         assert loaded.open_position is None
 
     assert _count_trade_log_events(db_path, "REJECT") == 1
+
+
+def test_entry_precheck_transport_failure_does_not_increment_reject_counter(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker: Any = _stub_testnet_entry_broker()
+
+        def _raise_exchange_info_error(_symbol: str) -> Any:
+            raise TestnetAPIError("Network error after retries: exchangeInfo")
+
+        broker._symbol_filters = _raise_exchange_info_error
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=0,
+        )
+
+        emitted: list[dict[str, object]] = []
+        appended: list[tuple[Path, list[dict[str, object]], list[str], str]] = []
+        trader.emit_event = lambda rows: emitted.extend(rows)  # type: ignore[assignment]
+        trader.append_rows = lambda path, rows, cols, name: appended.append((path, rows, cols, name))  # type: ignore[assignment]
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.order_rejects_today == 0
+        assert loaded.open_position is None
+        assert trader.stop_event.is_set() is False
+        assert any(
+            str(e.get("type") or "") == "ENTRY_FAILED" and str(e.get("stage") or "") == "precheck"
+            for e in emitted
+        )
+
+        failed_rows = [
+            row_item
+            for _, rows, cols, name in appended
+            if name == "orders.csv" and cols == ORDERS_COLUMNS
+            for row_item in rows
+            if str(row_item.get("status") or "") == "failed"
+            and str(row_item.get("status_detail") or "") == "entry_precheck_failed"
+        ]
+        assert len(failed_rows) == 1
+
+    assert _count_trade_log_events(db_path, "ENTRY_FAILED") == 1
+    assert _count_trade_log_events(db_path, "REJECT") == 0
+    assert _count_trade_log_events(db_path, "KILL_SWITCH") == 0
+
+
+def test_entry_submit_rate_limit_failure_does_not_increment_reject_counter(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker: Any = _stub_testnet_entry_broker()
+
+        def _raise_rate_limit(
+            *,
+            symbol: str,
+            side: str,
+            quantity: float,
+            reduce_only: bool = False,
+            reference_price: float | None = None,
+            client_order_id: str | None = None,
+        ) -> Any:
+            _ = (symbol, side, quantity, reduce_only, reference_price, client_order_id)
+            raise TestnetAPIError("Too many requests", status_code=429, payload={"code": -1003})
+
+        broker.place_market_order = _raise_rate_limit
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=0,
+        )
+
+        emitted: list[dict[str, object]] = []
+        appended: list[tuple[Path, list[dict[str, object]], list[str], str]] = []
+        trader.emit_event = lambda rows: emitted.extend(rows)  # type: ignore[assignment]
+        trader.append_rows = lambda path, rows, cols, name: appended.append((path, rows, cols, name))  # type: ignore[assignment]
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.order_rejects_today == 0
+        assert loaded.open_position is None
+        assert trader.stop_event.is_set() is False
+        assert any(
+            str(e.get("type") or "") == "ENTRY_FAILED" and str(e.get("stage") or "") == "submit"
+            for e in emitted
+        )
+
+        failed_rows = [
+            row_item
+            for _, rows, cols, name in appended
+            if name == "orders.csv" and cols == ORDERS_COLUMNS
+            for row_item in rows
+            if str(row_item.get("status") or "") == "failed"
+            and str(row_item.get("status_detail") or "") == "entry_submit_failed"
+        ]
+        assert len(failed_rows) == 1
+
+    assert _count_trade_log_events(db_path, "ENTRY_FAILED") == 1
+    assert _count_trade_log_events(db_path, "REJECT") == 0
+    assert _count_trade_log_events(db_path, "KILL_SWITCH") == 0
+
+
+def test_local_validation_reject_still_counts_toward_reject_kill_switch(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker: Any = _stub_testnet_entry_broker()
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.00001,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=0,
+        )
+
+        emitted: list[dict[str, object]] = []
+        appended: list[tuple[Path, list[dict[str, object]], list[str], str]] = []
+        trader.emit_event = lambda rows: emitted.extend(rows)  # type: ignore[assignment]
+        trader.append_rows = lambda path, rows, cols, name: appended.append((path, rows, cols, name))  # type: ignore[assignment]
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.order_rejects_today == 1
+        assert loaded.open_position is None
+        assert trader.stop_event.is_set() is True
+        assert any(str(e.get("type") or "") == "ENTRY_REJECTED" for e in emitted)
+        assert any(str(e.get("type") or "") == "KILL_SWITCH_ORDER_REJECTS" for e in emitted)
+
+        rejected_rows = [
+            row_item
+            for _, rows, cols, name in appended
+            if name == "orders.csv" and cols == ORDERS_COLUMNS
+            for row_item in rows
+            if str(row_item.get("status") or "") == "rejected"
+            and str(row_item.get("status_detail") or "") == "entry_rejected_local"
+        ]
+        assert len(rejected_rows) == 1
+
+    assert _count_trade_log_events(db_path, "REJECT") == 1
+    kill_row = _latest_trade_log_row(db_path, "KILL_SWITCH")
+    assert str(kill_row.get("reason") or "") == "KILL_SWITCH_ORDER_REJECTS"
 
 
 def test_ambiguous_entry_recovers_from_exchange_position_without_reject(tmp_path: Path) -> None:
