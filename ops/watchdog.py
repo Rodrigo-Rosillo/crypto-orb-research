@@ -590,7 +590,7 @@ def main() -> int:
     restart_on_stale = os.getenv("WATCHDOG_RESTART_ON_STALE", "0") == "1"
     restart_grace_seconds = to_int(os.getenv("WATCHDOG_RESTART_GRACE_SECONDS"), 300)
     bar_stale_enabled = os.getenv("WATCHDOG_BAR_STALE_ENABLED", "0") == "1"
-    bar_stale_seconds = to_int(os.getenv("WATCHDOG_BAR_STALE_SECONDS"), 3600)
+    bar_stale_seconds = to_int(os.getenv("WATCHDOG_BAR_STALE_SECONDS"), 3900)
     stop_on_restart_storm = os.getenv("WATCHDOG_STOP_ON_RESTART_STORM", "0") == "1"
     restart_storm_delta = to_int(os.getenv("WATCHDOG_RESTART_STORM_DELTA"), 3)
     state_path = Path(os.getenv("WATCHDOG_STATE_PATH", "/home/ubuntu/.watchdog_state.json"))
