@@ -1,0 +1,18 @@
+{
+  "bars_processed": 0,
+  "current_day_utc": null,
+  "last_bar_open_time_utc": null,
+  "open_position": {
+    "entry_order_id": null,
+    "entry_price": 0.0,
+    "entry_time_utc": "2024-01-01T00:30:00+00:00",
+    "qty": 1.0,
+    "side": "SHORT",
+    "sl_order_id": null,
+    "sl_price": null,
+    "symbol": "SOLUSDT",
+    "tp_order_id": null,
+    "tp_price": null
+  },
+  "order_rejects_today": 0
+}

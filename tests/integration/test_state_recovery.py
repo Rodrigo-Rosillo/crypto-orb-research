@@ -377,6 +377,7 @@ def test_ambiguous_entry_recovers_from_exchange_position_without_reject(tmp_path
         assert loaded.order_rejects_today == 0
         assert loaded.open_position is not None
         assert loaded.open_position.entry_order_id is None
+        assert loaded.open_position.entry_time_utc == "2024-01-01T00:30:00+00:00"
         assert loaded.open_position.qty == pytest.approx(1.0, abs=1e-12)
         assert loaded.open_position.entry_price == pytest.approx(100.0, abs=1e-12)
         assert loaded.open_position.tp_order_id is not None
@@ -522,6 +523,67 @@ def test_unknown_protection_halts_even_if_flatten_succeeds(tmp_path: Path) -> No
         assert trader.skip_cancel_open_orders_on_exit_runtime is False
 
 
+def test_missing_protection_preserves_open_position_when_flatten_fails(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(reject_tp=True, reject_flatten=True, fill_price=100.0)
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is not None
+        assert loaded.open_position.side == "SHORT"
+        assert loaded.open_position.entry_time_utc == "2024-01-01T00:30:00+00:00"
+        assert loaded.open_position.sl_order_id is not None
+        assert trader.stop_event.is_set() is True
+        assert trader.skip_cancel_open_orders_on_exit_runtime is True
+
+
+def test_unknown_protection_preserves_open_position_when_flatten_fails(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(
+            reject_tp=True,
+            fail_get_algo_open_orders=True,
+            reject_flatten=True,
+            fill_price=100.0,
+        )
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is not None
+        assert loaded.open_position.side == "SHORT"
+        assert loaded.open_position.entry_time_utc == "2024-01-01T00:30:00+00:00"
+        assert loaded.open_position.sl_order_id is not None
+        assert trader.stop_event.is_set() is True
+        assert trader.skip_cancel_open_orders_on_exit_runtime is True
+
+
 def test_bracket_skipped_flattens_first_and_kills_on_flatten_failure(tmp_path: Path) -> None:
     db_path = tmp_path / "state.db"
     with SQLiteStateStore(db_path=db_path) as store:
@@ -542,7 +604,45 @@ def test_bracket_skipped_flattens_first_and_kills_on_flatten_failure(tmp_path: P
         asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row_missing_orb()))
 
         loaded = store.load_state()
-        assert loaded.open_position is None
+        assert loaded.open_position is not None
+        assert loaded.open_position.side == "SHORT"
+        assert loaded.open_position.entry_time_utc == "2024-01-01T00:30:00+00:00"
+        assert loaded.open_position.tp_order_id is None
+        assert loaded.open_position.sl_order_id is None
+        assert trader.stop_event.is_set() is True
+        assert trader.skip_cancel_open_orders_on_exit_runtime is True
+
+
+def test_ambiguous_entry_preserves_open_position_when_flatten_fails(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        broker = FakeBinanceClient(
+            entry_raise_ambiguous=True,
+            ambiguous_entry_lands=True,
+            ambiguous_entry_entry_price=0.0,
+            reject_flatten=True,
+            fill_price=100.0,
+        )
+        trader = build_trader_service(
+            broker=broker,
+            store=store,
+            state=state,
+            work_dir=tmp_path,
+            leverage=1.0,
+            position_size=0.1,
+            initial_capital=1000.0,
+            max_order_rejects_per_day=10,
+        )
+
+        bar_t0 = pd.Timestamp("2024-01-01 00:30:00", tz="UTC")
+        asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
+
+        loaded = store.load_state()
+        assert loaded.open_position is not None
+        assert loaded.open_position.side == "SHORT"
+        assert loaded.open_position.entry_price == pytest.approx(0.0, abs=1e-12)
+        assert loaded.open_position.entry_time_utc == "2024-01-01T00:30:00+00:00"
         assert trader.stop_event.is_set() is True
         assert trader.skip_cancel_open_orders_on_exit_runtime is True
 

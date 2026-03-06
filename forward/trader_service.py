@@ -152,6 +152,67 @@ class TraderService:
         self.store.save_state(self.state)
         self.store.export_state_json_snapshot(self.state_path, self.state)
 
+    def _emit_event_best_effort(self, rows: list[dict[str, Any]]) -> None:
+        try:
+            self.emit_event(rows)
+        except Exception:
+            pass
+
+    def _append_rows_best_effort(
+        self,
+        path: Path,
+        rows: list[dict[str, Any]],
+        columns: list[str],
+        name: str,
+    ) -> None:
+        try:
+            self.append_rows(path, rows, columns, name)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _entry_time_utc_from_bar(bar_open_time: pd.Timestamp) -> str:
+        return bar_open_time.tz_convert("UTC").isoformat()
+
+    def _set_open_position_state(
+        self,
+        *,
+        side: str,
+        qty: float,
+        entry_price: float,
+        entry_time_utc: str,
+        entry_order_id: Optional[int],
+        tp_order_id: Optional[int] = None,
+        sl_order_id: Optional[int] = None,
+        tp_price: Optional[float] = None,
+        sl_price: Optional[float] = None,
+    ) -> None:
+        existing = self.state.open_position
+        if existing is not None:
+            if entry_order_id is None:
+                entry_order_id = existing.entry_order_id
+            if tp_order_id is None:
+                tp_order_id = existing.tp_order_id
+            if sl_order_id is None:
+                sl_order_id = existing.sl_order_id
+            if tp_price is None:
+                tp_price = existing.tp_price
+            if sl_price is None:
+                sl_price = existing.sl_price
+
+        self.state.open_position = OpenPositionState(
+            symbol=self.symbol,
+            side=str(side),
+            qty=float(qty),
+            entry_price=float(entry_price),
+            entry_time_utc=str(entry_time_utc),
+            entry_order_id=int(entry_order_id) if entry_order_id is not None else None,
+            tp_order_id=int(tp_order_id) if tp_order_id is not None else None,
+            sl_order_id=int(sl_order_id) if sl_order_id is not None else None,
+            tp_price=float(tp_price) if tp_price is not None else None,
+            sl_price=float(sl_price) if sl_price is not None else None,
+        )
+
     def fetch_exchange_position(self) -> Tuple[str, float, float, float]:
         pr = self.broker.position_risk(symbol=self.symbol)
         amt = _float(pr.get("positionAmt"), 0.0)
@@ -906,7 +967,7 @@ class TraderService:
             try:
                 ex_side, ex_qty, _, _ = self.fetch_exchange_position()
             except Exception as e:
-                self.emit_event(
+                self._emit_event_best_effort(
                     [
                         {
                             "ts": _utcnow_iso(),
@@ -919,7 +980,7 @@ class TraderService:
                 return False, "position_fetch_failed"
 
             if ex_side == "FLAT" or ex_qty < 1e-9:
-                self.emit_event(
+                self._emit_event_best_effort(
                     [
                         {
                             "ts": _utcnow_iso(),
@@ -934,7 +995,7 @@ class TraderService:
             close_side = "SELL" if ex_side == "LONG" else "BUY"
             known_side_u = str(ex_side)
 
-        self.emit_event(
+        self._emit_event_best_effort(
             [
                 {
                     "ts": _utcnow_iso(),
@@ -957,7 +1018,7 @@ class TraderService:
             )
             flatten_oid = _extract_order_id(flatten_resp)
         except Exception as e:
-            self.emit_event(
+            self._emit_event_best_effort(
                 [
                     {
                         "ts": _utcnow_iso(),
@@ -972,7 +1033,7 @@ class TraderService:
         try:
             post_side, post_qty, _, _ = self.fetch_exchange_position()
         except Exception as e:
-            self.emit_event(
+            self._emit_event_best_effort(
                 [
                     {
                         "ts": _utcnow_iso(),
@@ -986,7 +1047,7 @@ class TraderService:
             return False, "post_flatten_position_fetch_failed"
 
         if post_side == "FLAT" or post_qty < 1e-9:
-            self.emit_event(
+            self._emit_event_best_effort(
                 [
                     {
                         "ts": _utcnow_iso(),
@@ -1011,7 +1072,7 @@ class TraderService:
                 raw_missing = bool(exit_price_raw <= 0 or exit_qty_raw <= 0)
                 enrich_valid = bool(op is not None and exit_price > 0 and exit_qty > 0)
                 if raw_missing and enrich_valid:
-                    self.emit_event(
+                    self._emit_event_best_effort(
                         [
                             {
                                 "ts": _utcnow_iso(),
@@ -1030,7 +1091,7 @@ class TraderService:
                     else (known_side_u if known_side_u in ("LONG", "SHORT") else None)
                 )
                 if not enrich_valid:
-                    self.emit_event(
+                    self._emit_event_best_effort(
                         [
                             {
                                 "ts": _utcnow_iso(),
@@ -1085,7 +1146,7 @@ class TraderService:
                 pass
             return True, "flattened"
 
-        self.emit_event(
+        self._emit_event_best_effort(
             [
                 {
                     "ts": _utcnow_iso(),
@@ -1101,7 +1162,7 @@ class TraderService:
         return False, "position_not_flat_after_flatten"
 
     def _trigger_kill_switch(self, reason: str, detail: str) -> None:
-        self.emit_event(
+        self._emit_event_best_effort(
             [
                 {
                     "ts": _utcnow_iso(),
@@ -1131,6 +1192,7 @@ class TraderService:
         self,
         *,
         error: AmbiguousOrderError,
+        bar_open_time: pd.Timestamp,
         signal_type: str,
         pos_side: str,
         qty_sent: float,
@@ -1139,6 +1201,8 @@ class TraderService:
         final_side = "FLAT"
         final_qty = 0.0
         final_entry_price = 0.0
+        entry_time_utc = self._entry_time_utc_from_bar(bar_open_time)
+        best_entry_order_id = _extract_order_id(error.context)
 
         for attempt in range(int(ENTRY_AMBIGUITY_VERIFY_ATTEMPTS)):
             if attempt > 0:
@@ -1161,7 +1225,15 @@ class TraderService:
                 }
             )
             if final_side == str(pos_side) and final_qty > 1e-9 and final_entry_price > 0:
-                self.emit_event(
+                self._set_open_position_state(
+                    side=str(final_side),
+                    qty=float(final_qty),
+                    entry_price=float(final_entry_price),
+                    entry_time_utc=entry_time_utc,
+                    entry_order_id=best_entry_order_id,
+                )
+                self.persist_state()
+                self._emit_event_best_effort(
                     [
                         {
                             "ts": _utcnow_iso(),
@@ -1186,7 +1258,7 @@ class TraderService:
         if error.context:
             ambiguous_reason = f"{ambiguous_reason}; context={_compact_json(error.context)}"
 
-        self.emit_event(
+        self._emit_event_best_effort(
             [
                 {
                     "ts": _utcnow_iso(),
@@ -1200,7 +1272,7 @@ class TraderService:
                 }
             ]
         )
-        self.append_rows(
+        self._append_rows_best_effort(
             self.orders_path,
             [
                 {
@@ -1232,8 +1304,18 @@ class TraderService:
         else:
             flatten_ok, flatten_detail = self._emergency_flatten(reason="entry_ambiguous")
 
-        self.state.open_position = None
-        self.persist_state()
+        if flatten_ok:
+            self.state.open_position = None
+            self.persist_state()
+        elif final_side != "FLAT" and final_qty > 1e-9:
+            self._set_open_position_state(
+                side=str(final_side),
+                qty=float(final_qty),
+                entry_price=float(final_entry_price),
+                entry_time_utc=entry_time_utc,
+                entry_order_id=best_entry_order_id,
+            )
+            self.persist_state()
         if not flatten_ok:
             self.skip_cancel_open_orders_on_exit_runtime = True
 
@@ -1255,6 +1337,7 @@ class TraderService:
         signal_type = str(row.get("signal_type", "") or "")
         side = "SELL" if signal < 0 else "BUY"
         pos_side = "SHORT" if side == "SELL" else "LONG"
+        entry_time_utc = self._entry_time_utc_from_bar(bar_open_time)
 
         if self.risk_limits is not None and bool(self.risk_limits.enabled):
             if float(self.leverage) > float(self.risk_limits.max_leverage):
@@ -1444,6 +1527,7 @@ class TraderService:
         except AmbiguousOrderError as e:
             entry_resp = await self._recover_ambiguous_entry(
                 error=e,
+                bar_open_time=bar_open_time,
                 signal_type=signal_type,
                 pos_side=pos_side,
                 qty_sent=float(qty_sent),
@@ -1466,7 +1550,7 @@ class TraderService:
         exec_qty = _order_exec_qty(entry_resp)
         entry_qty = float(exec_qty or qty_sent)
 
-        self.append_rows(
+        self._append_rows_best_effort(
             self.orders_path,
             [
                 {
@@ -1486,7 +1570,7 @@ class TraderService:
             ORDERS_COLUMNS,
             "orders.csv",
         )
-        self.append_rows(
+        self._append_rows_best_effort(
             self.fills_path,
             [
                 {
@@ -1514,18 +1598,27 @@ class TraderService:
             fee=0.0,
             funding_applied=None,
             reason=None,
-            bar_time_utc=bar_open_time.tz_convert("UTC").isoformat(),
+            bar_time_utc=entry_time_utc,
         )
 
         orb_high = row.get("orb_high")
         if orb_high is None or (isinstance(orb_high, float) and pd.isna(orb_high)):
-            self.emit_event([{"ts": _utcnow_iso(), "type": "BRACKET_SKIPPED", "reason": "missing_orb_high"}])
+            self._emit_event_best_effort([{"ts": _utcnow_iso(), "type": "BRACKET_SKIPPED", "reason": "missing_orb_high"}])
             flatten_ok, flatten_detail = self._emergency_flatten(
                 reason="missing_orb_high",
                 known_qty=float(entry_qty),
                 known_side=pos_side,
             )
-            self.state.open_position = None
+            if flatten_ok:
+                self.state.open_position = None
+            else:
+                self._set_open_position_state(
+                    side=pos_side,
+                    qty=float(entry_qty),
+                    entry_price=float(entry_price),
+                    entry_time_utc=entry_time_utc,
+                    entry_order_id=int(entry_oid) if entry_oid is not None else None,
+                )
             self.persist_state()
             if not flatten_ok:
                 self.skip_cancel_open_orders_on_exit_runtime = True
@@ -1556,7 +1649,7 @@ class TraderService:
 
         protection_baseline_epoch_s, baseline_source = self._protection_baseline_epoch_seconds()
         if baseline_source != "exchange":
-            self.emit_event(
+            self._emit_event_best_effort(
                 [
                     {
                         "ts": _utcnow_iso(),
@@ -1566,7 +1659,7 @@ class TraderService:
                 ]
             )
 
-        self.emit_event(
+        self._emit_event_best_effort(
             [
                 {
                     "ts": _utcnow_iso(),
@@ -1615,7 +1708,7 @@ class TraderService:
                 tp_q = self.broker.get_last_quantization()
                 if tp_q:
                     tp_reject_event["quantization"] = tp_q
-            self.emit_event([tp_reject_event])
+            self._emit_event_best_effort([tp_reject_event])
 
         try:
             if isinstance(self.broker, BinanceFuturesTestnetBroker):
@@ -1643,9 +1736,9 @@ class TraderService:
                 sl_q = self.broker.get_last_quantization()
                 if sl_q:
                     sl_reject_event["quantization"] = sl_q
-            self.emit_event([sl_reject_event])
+            self._emit_event_best_effort([sl_reject_event])
 
-        self.append_rows(
+        self._append_rows_best_effort(
             self.orders_path,
             [
                 {
@@ -1695,7 +1788,7 @@ class TraderService:
 
         if p_status == "protected":
             if bool(protection.get("recovered_from_fallback")):
-                self.emit_event(
+                self._emit_event_best_effort(
                     [
                         {
                             "ts": _utcnow_iso(),
@@ -1706,12 +1799,11 @@ class TraderService:
                     ]
                 )
 
-            self.state.open_position = OpenPositionState(
-                symbol=self.symbol,
+            self._set_open_position_state(
                 side=pos_side,
                 qty=float(entry_qty),
                 entry_price=float(entry_price),
-                entry_time_utc=bar_open_time.tz_convert("UTC").isoformat(),
+                entry_time_utc=entry_time_utc,
                 entry_order_id=int(entry_oid) if entry_oid is not None else None,
                 tp_order_id=int(protection.get("tp_order_id")) if protection.get("tp_order_id") is not None else None,
                 sl_order_id=int(protection.get("sl_order_id")) if protection.get("sl_order_id") is not None else None,
@@ -1722,7 +1814,7 @@ class TraderService:
             return
 
         if p_status == "missing":
-            self.emit_event(
+            self._emit_event_best_effort(
                 [
                     {
                         "ts": _utcnow_iso(),
@@ -1737,7 +1829,20 @@ class TraderService:
                 known_qty=float(entry_qty),
                 known_side=pos_side,
             )
-            self.state.open_position = None
+            if flatten_ok:
+                self.state.open_position = None
+            else:
+                self._set_open_position_state(
+                    side=pos_side,
+                    qty=float(entry_qty),
+                    entry_price=float(entry_price),
+                    entry_time_utc=entry_time_utc,
+                    entry_order_id=int(entry_oid) if entry_oid is not None else None,
+                    tp_order_id=int(protection.get("tp_order_id")) if protection.get("tp_order_id") is not None else None,
+                    sl_order_id=int(protection.get("sl_order_id")) if protection.get("sl_order_id") is not None else None,
+                    tp_price=float(tp_sent_price),
+                    sl_price=float(sl_sent_price),
+                )
             self.persist_state()
             if not flatten_ok:
                 self.skip_cancel_open_orders_on_exit_runtime = True
@@ -1747,7 +1852,7 @@ class TraderService:
                 )
             return
 
-        self.emit_event(
+        self._emit_event_best_effort(
             [
                 {
                     "ts": _utcnow_iso(),
@@ -1762,7 +1867,20 @@ class TraderService:
             known_qty=float(entry_qty),
             known_side=pos_side,
         )
-        self.state.open_position = None
+        if flatten_ok:
+            self.state.open_position = None
+        else:
+            self._set_open_position_state(
+                side=pos_side,
+                qty=float(entry_qty),
+                entry_price=float(entry_price),
+                entry_time_utc=entry_time_utc,
+                entry_order_id=int(entry_oid) if entry_oid is not None else None,
+                tp_order_id=int(protection.get("tp_order_id")) if protection.get("tp_order_id") is not None else None,
+                sl_order_id=int(protection.get("sl_order_id")) if protection.get("sl_order_id") is not None else None,
+                tp_price=float(tp_sent_price),
+                sl_price=float(sl_sent_price),
+            )
         self.persist_state()
         if not flatten_ok:
             self.skip_cancel_open_orders_on_exit_runtime = True
