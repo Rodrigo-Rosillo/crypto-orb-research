@@ -757,6 +757,17 @@ async def run_live_testnet(
                         events_path,
                         [{"ts": _utcnow_iso(), "type": "SHUTDOWN_GUARD_FLATTEN_ERROR", "error": str(e)}],
                     )
+                    try:
+                        ex_side, ex_qty, _, _ = trader_service.fetch_exchange_position()
+                        if ex_side == "FLAT" or ex_qty < 1e-9:
+                            trader_service.state.open_position = None
+                            trader_service.skip_cancel_open_orders_on_exit_runtime = False
+                            try:
+                                trader_service.persist_state()
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
 
             runtime_skip = bool(getattr(trader_service, "skip_cancel_open_orders_on_exit_runtime", False))
             if _should_cancel_on_exit(cancel_open_orders_on_exit, runtime_skip):

@@ -10,12 +10,14 @@ import pandas as pd
 
 from forward.binance_live import LiveBar
 from forward.live_testnet import run_live_testnet
+from forward.state_store_sqlite import OpenPositionState, SQLiteStateStore
 from forward.trader_service import TraderService
 
 
 class FakeRuntimeBroker:
-    def __init__(self, *, position_amts: list[float]) -> None:
+    def __init__(self, *, position_amts: list[float], position_risk_raise_on_call: int | None = None) -> None:
         self.position_amts = list(position_amts)
+        self.position_risk_raise_on_call = position_risk_raise_on_call
         self.position_risk_call_count = 0
         self.cancel_all_called = False
         self.flatten_calls: list[dict[str, Any]] = []
@@ -25,6 +27,11 @@ class FakeRuntimeBroker:
         return {"leverage": int(leverage)}
 
     def position_risk(self, *, symbol: str) -> dict[str, Any]:
+        if (
+            self.position_risk_raise_on_call is not None
+            and self.position_risk_call_count == int(self.position_risk_raise_on_call)
+        ):
+            raise RuntimeError("position_risk_failed")
         idx = min(self.position_risk_call_count, len(self.position_amts) - 1)
         amt = float(self.position_amts[idx])
         self.position_risk_call_count += 1
@@ -171,6 +178,21 @@ def _run_cfg(tmp_path: Path) -> tuple[Path, dict[str, Any], dict[str, Any]]:
         },
     }
     return run_dir, cfg, ft_cfg
+
+
+def _seed_open_position_state(run_dir: Path, *, side: str, qty: float, symbol: str = "SOLUSDT") -> None:
+    db_path = run_dir / "state.db"
+    with SQLiteStateStore(db_path=db_path) as store:
+        state = store.load_state()
+        state.open_position = OpenPositionState(
+            symbol=str(symbol),
+            side=str(side),
+            qty=float(qty),
+            entry_price=100.0,
+            entry_time_utc="2024-01-01T00:30:00+00:00",
+            entry_order_id=123,
+        )
+        store.save_state(state)
 
 
 def test_runtime_reconciliation_blocks_new_entry_and_emits_runtime_reason(tmp_path: Path, monkeypatch) -> None:
@@ -360,3 +382,193 @@ def test_runtime_reconciliation_reuses_single_position_snapshot_per_bar(tmp_path
 
     assert rc == 0
     assert broker.position_risk_call_count == 2
+
+
+def test_shutdown_guard_exception_recheck_flat_allows_final_cancel(tmp_path: Path, monkeypatch) -> None:
+    bootstrap_open, bootstrap_close, _ = _runtime_timestamps()
+    broker = FakeRuntimeBroker(position_amts=[1.0, 0.0])
+    FakeDataService.bars = []
+
+    def _raise_flatten(self: TraderService, *, reason: str) -> tuple[bool, str]:
+        _ = reason
+        raise RuntimeError("shutdown_flatten_failed")
+
+    monkeypatch.setattr("forward.live_testnet.BinanceFuturesTestnetBroker", lambda cfg: broker)
+    monkeypatch.setattr("forward.live_testnet.DataService", FakeDataService)
+    monkeypatch.setattr(
+        "forward.live_testnet.fetch_recent_klines_df",
+        lambda **kwargs: (
+            _bootstrap_df(bootstrap_open),
+            {"last_close_time": bootstrap_close.isoformat()},
+        ),
+    )
+    monkeypatch.setattr(
+        "forward.live_testnet.fetch_server_time_ms",
+        lambda market: (int(pd.Timestamp.now(tz="UTC").timestamp() * 1000), {"source": str(market)}),
+    )
+    monkeypatch.setattr(TraderService, "_emergency_flatten", _raise_flatten)
+    monkeypatch.setenv("HEARTBEAT_PATH", str(tmp_path / "heartbeat"))
+
+    run_dir, cfg, ft_cfg = _run_cfg(tmp_path)
+    _seed_open_position_state(run_dir, side="LONG", qty=1.0)
+
+    rc = asyncio.run(
+        run_live_testnet(
+            run_dir=run_dir,
+            cfg=cfg,
+            ft_cfg=ft_cfg,
+            risk_limits=None,
+            symbol="SOLUSDT",
+            timeframe="30m",
+            orb_start=time(0, 0),
+            orb_end=time(0, 30),
+            orb_cutoff=time(23, 59),
+            adx_period=14,
+            adx_threshold=20.0,
+            initial_capital=1000.0,
+            position_size=0.1,
+            taker_fee_rate=0.0005,
+            leverage=1.0,
+            delay_bars=1,
+            slippage_bps=0.0,
+            max_bars=1,
+        )
+    )
+
+    events = _read_events(run_dir / "events.jsonl")
+    event_types = [str(event.get("type") or "") for event in events]
+    with SQLiteStateStore(db_path=run_dir / "state.db") as store:
+        loaded = store.load_state()
+
+    assert rc == 0
+    assert broker.cancel_all_called is True
+    assert loaded.open_position is None
+    assert "SHUTDOWN_GUARD_FLATTEN_ERROR" in event_types
+    assert "CANCEL_ALL_OPEN_ORDERS" in event_types
+    assert "CANCEL_ALL_OPEN_ORDERS_SKIPPED_RUNTIME_GUARD" not in event_types
+
+
+def test_shutdown_guard_exception_recheck_open_keeps_cancel_skipped(tmp_path: Path, monkeypatch) -> None:
+    bootstrap_open, bootstrap_close, _ = _runtime_timestamps()
+    broker = FakeRuntimeBroker(position_amts=[1.0, 1.0])
+    FakeDataService.bars = []
+
+    def _raise_flatten(self: TraderService, *, reason: str) -> tuple[bool, str]:
+        _ = reason
+        raise RuntimeError("shutdown_flatten_failed")
+
+    monkeypatch.setattr("forward.live_testnet.BinanceFuturesTestnetBroker", lambda cfg: broker)
+    monkeypatch.setattr("forward.live_testnet.DataService", FakeDataService)
+    monkeypatch.setattr(
+        "forward.live_testnet.fetch_recent_klines_df",
+        lambda **kwargs: (
+            _bootstrap_df(bootstrap_open),
+            {"last_close_time": bootstrap_close.isoformat()},
+        ),
+    )
+    monkeypatch.setattr(
+        "forward.live_testnet.fetch_server_time_ms",
+        lambda market: (int(pd.Timestamp.now(tz="UTC").timestamp() * 1000), {"source": str(market)}),
+    )
+    monkeypatch.setattr(TraderService, "_emergency_flatten", _raise_flatten)
+    monkeypatch.setenv("HEARTBEAT_PATH", str(tmp_path / "heartbeat"))
+
+    run_dir, cfg, ft_cfg = _run_cfg(tmp_path)
+    _seed_open_position_state(run_dir, side="LONG", qty=1.0)
+
+    rc = asyncio.run(
+        run_live_testnet(
+            run_dir=run_dir,
+            cfg=cfg,
+            ft_cfg=ft_cfg,
+            risk_limits=None,
+            symbol="SOLUSDT",
+            timeframe="30m",
+            orb_start=time(0, 0),
+            orb_end=time(0, 30),
+            orb_cutoff=time(23, 59),
+            adx_period=14,
+            adx_threshold=20.0,
+            initial_capital=1000.0,
+            position_size=0.1,
+            taker_fee_rate=0.0005,
+            leverage=1.0,
+            delay_bars=1,
+            slippage_bps=0.0,
+            max_bars=1,
+        )
+    )
+
+    events = _read_events(run_dir / "events.jsonl")
+    event_types = [str(event.get("type") or "") for event in events]
+    with SQLiteStateStore(db_path=run_dir / "state.db") as store:
+        loaded = store.load_state()
+
+    assert rc == 0
+    assert broker.cancel_all_called is False
+    assert loaded.open_position is not None
+    assert "SHUTDOWN_GUARD_FLATTEN_ERROR" in event_types
+    assert "CANCEL_ALL_OPEN_ORDERS_SKIPPED_RUNTIME_GUARD" in event_types
+
+
+def test_shutdown_guard_exception_recheck_failure_keeps_cancel_skipped(tmp_path: Path, monkeypatch) -> None:
+    bootstrap_open, bootstrap_close, _ = _runtime_timestamps()
+    broker = FakeRuntimeBroker(position_amts=[1.0], position_risk_raise_on_call=1)
+    FakeDataService.bars = []
+
+    def _raise_flatten(self: TraderService, *, reason: str) -> tuple[bool, str]:
+        _ = reason
+        raise RuntimeError("shutdown_flatten_failed")
+
+    monkeypatch.setattr("forward.live_testnet.BinanceFuturesTestnetBroker", lambda cfg: broker)
+    monkeypatch.setattr("forward.live_testnet.DataService", FakeDataService)
+    monkeypatch.setattr(
+        "forward.live_testnet.fetch_recent_klines_df",
+        lambda **kwargs: (
+            _bootstrap_df(bootstrap_open),
+            {"last_close_time": bootstrap_close.isoformat()},
+        ),
+    )
+    monkeypatch.setattr(
+        "forward.live_testnet.fetch_server_time_ms",
+        lambda market: (int(pd.Timestamp.now(tz="UTC").timestamp() * 1000), {"source": str(market)}),
+    )
+    monkeypatch.setattr(TraderService, "_emergency_flatten", _raise_flatten)
+    monkeypatch.setenv("HEARTBEAT_PATH", str(tmp_path / "heartbeat"))
+
+    run_dir, cfg, ft_cfg = _run_cfg(tmp_path)
+    _seed_open_position_state(run_dir, side="LONG", qty=1.0)
+
+    rc = asyncio.run(
+        run_live_testnet(
+            run_dir=run_dir,
+            cfg=cfg,
+            ft_cfg=ft_cfg,
+            risk_limits=None,
+            symbol="SOLUSDT",
+            timeframe="30m",
+            orb_start=time(0, 0),
+            orb_end=time(0, 30),
+            orb_cutoff=time(23, 59),
+            adx_period=14,
+            adx_threshold=20.0,
+            initial_capital=1000.0,
+            position_size=0.1,
+            taker_fee_rate=0.0005,
+            leverage=1.0,
+            delay_bars=1,
+            slippage_bps=0.0,
+            max_bars=1,
+        )
+    )
+
+    events = _read_events(run_dir / "events.jsonl")
+    event_types = [str(event.get("type") or "") for event in events]
+    with SQLiteStateStore(db_path=run_dir / "state.db") as store:
+        loaded = store.load_state()
+
+    assert rc == 0
+    assert broker.cancel_all_called is False
+    assert loaded.open_position is not None
+    assert "SHUTDOWN_GUARD_FLATTEN_ERROR" in event_types
+    assert "CANCEL_ALL_OPEN_ORDERS_SKIPPED_RUNTIME_GUARD" in event_types
