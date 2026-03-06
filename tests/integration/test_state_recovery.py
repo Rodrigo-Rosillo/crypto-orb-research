@@ -844,7 +844,13 @@ def test_missing_protection_with_flatten_failure_halts_and_sets_runtime_skip(tmp
         asyncio.run(trader.maybe_place_trade_from_signal(bar_t0, _entry_row()))
 
         loaded = store.load_state()
-        assert loaded.open_position is None
+        assert loaded.open_position is not None
+        assert loaded.open_position.side == "SHORT"
+        assert loaded.open_position.entry_price == pytest.approx(100.0, abs=1e-12)
+        assert loaded.open_position.entry_time_utc == "2024-01-01T00:30:00+00:00"
+        assert loaded.open_position.entry_order_id is not None
+        assert loaded.open_position.tp_order_id is None
+        assert loaded.open_position.sl_order_id is not None
         assert trader.stop_event.is_set() is True
         assert trader.skip_cancel_open_orders_on_exit_runtime is True
 
