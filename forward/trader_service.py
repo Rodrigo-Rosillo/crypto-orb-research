@@ -301,107 +301,286 @@ class TraderService:
             "positions.csv",
         )
 
+    @staticmethod
+    def _normalize_algo_order_status(status: str) -> str:
+        st = str(status or "").upper()
+        if st == "CANCELLED":
+            return "CANCELED"
+        return st
+
+    @classmethod
+    def _is_algo_order_terminal_status(cls, status: str) -> bool:
+        return cls._normalize_algo_order_status(status) in ("FINISHED", "CANCELED", "REJECTED", "EXPIRED")
+
+    @staticmethod
+    def _is_idempotent_cancel_error(error: Exception) -> bool:
+        if isinstance(error, TestnetAPIError):
+            payload = getattr(error, "payload", None)
+            if isinstance(payload, dict):
+                code = payload.get("code")
+                try:
+                    if code is not None and int(code) in (-2011, -2013):
+                        return True
+                except Exception:
+                    pass
+
+        msg = str(error).lower()
+        return any(marker in msg for marker in ("does not exist", "unknown order", "not found"))
+
+    @staticmethod
+    def _choose_runtime_exit_leg(legs: dict[str, dict[str, Any]]) -> Optional[dict[str, Any]]:
+        for statuses in (("FINISHED",), ("CANCELED", "REJECTED", "EXPIRED")):
+            for kind in ("tp", "sl"):
+                leg = legs.get(kind)
+                if leg is None:
+                    continue
+                if str(leg.get("status") or "") in statuses:
+                    return leg
+        return None
+
+    def _append_exit_trade_log_from_protection_order(
+        self,
+        *,
+        op: OpenPositionState,
+        order_payload: Any,
+        reason: str,
+    ) -> None:
+        closed_side = op.side
+        closed_qty = float(op.qty)
+        closed_symbol = op.symbol
+        exit_price_raw = _order_avg_price(order_payload)
+        exit_qty_raw = _order_exec_qty(order_payload)
+        exit_price = float(exit_price_raw)
+        exit_qty = float(exit_qty_raw)
+
+        if exit_price <= 0:
+            exit_price = float(op.entry_price)
+        if exit_qty <= 0:
+            exit_qty = float(op.qty)
+
+        raw_missing = bool(exit_price_raw <= 0 or exit_qty_raw <= 0)
+        enrich_valid = bool(exit_price > 0 and exit_qty > 0)
+        if raw_missing and enrich_valid:
+            self.emit_event(
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "EXIT_ENRICH_FALLBACK",
+                        "reason": "avg_price_or_qty_missing",
+                        "exit_price_raw": float(exit_price_raw),
+                        "exit_qty_raw": float(exit_qty_raw),
+                    }
+                ]
+            )
+
+        if not enrich_valid:
+            self.emit_event(
+                [
+                    {
+                        "ts": _utcnow_iso(),
+                        "type": "EXIT_ENRICH_FAILED",
+                        "reason": "invalid_price_or_qty",
+                        "exit_price_raw": float(exit_price_raw),
+                        "exit_qty_raw": float(exit_qty_raw),
+                    }
+                ]
+            )
+            self.store.append_trade_log(
+                event_type="EXIT",
+                symbol=closed_symbol,
+                side=closed_side,
+                qty=closed_qty,
+                price=None,
+                realized_pnl=None,
+                fee=None,
+                funding_applied=0.0,
+                reason=str(reason),
+                bar_time_utc=_utcnow_iso(),
+            )
+            return
+
+        # Fee semantics (Option A): realized_pnl is NET of fees.
+        # EXIT.fee stores the round-trip taker fee for reference only.
+        # Do not subtract fees again when summing realized_pnl.
+        entry_notional = float(op.entry_price) * float(op.qty)
+        exit_notional = float(exit_price) * float(exit_qty)
+        round_trip_fee = (entry_notional + exit_notional) * float(self.taker_fee_rate)
+        if str(op.side).upper() == "LONG":
+            gross_pnl = (float(exit_price) - float(op.entry_price)) * float(exit_qty)
+        else:
+            gross_pnl = (float(op.entry_price) - float(exit_price)) * float(exit_qty)
+        realized_pnl = float(gross_pnl - round_trip_fee)
+        self.store.append_trade_log(
+            event_type="EXIT",
+            symbol=closed_symbol,
+            side=closed_side,
+            qty=float(exit_qty),
+            price=float(exit_price),
+            realized_pnl=float(realized_pnl),
+            fee=float(round_trip_fee),
+            funding_applied=0.0,
+            reason=str(reason),
+            bar_time_utc=_utcnow_iso(),
+        )
+
     async def poll_open_orders(self) -> None:
         if self.state.open_position is None:
             return
         op = self.state.open_position
-        changed = False
+        legs: dict[str, dict[str, Any]] = {}
         for kind, oid in [("tp", op.tp_order_id), ("sl", op.sl_order_id)]:
             if oid is None:
                 continue
+            leg: dict[str, Any] = {
+                "kind": str(kind),
+                "order_id": int(oid),
+                "status": "",
+                "payload": None,
+                "error": None,
+            }
             try:
                 o = self.broker.get_algo_order(symbol=self.symbol, algo_id=int(oid))
-                st = _order_status(o)
-                if st in ("FINISHED", "CANCELED", "REJECTED", "EXPIRED"):
+                st = self._normalize_algo_order_status(_order_status(o))
+                leg["status"] = str(st)
+                leg["payload"] = o
+                if self._is_algo_order_terminal_status(st):
                     self.emit_event([{"ts": _utcnow_iso(), "type": "ORDER_UPDATE", "order_id": int(oid), "kind": kind, "status": st}])
-                    if st == "FINISHED":
-                        ex_side, ex_qty, _, _ = self.fetch_exchange_position()
-                        if ex_side == "FLAT" or ex_qty < 1e-9:
-                            self.emit_event([{"ts": _utcnow_iso(), "type": "POSITION_CLOSED", "via": kind}])
-                            closed_side = op.side
-                            closed_qty = float(op.qty)
-                            closed_symbol = op.symbol
-                            exit_price_raw = _order_avg_price(o)
-                            exit_qty_raw = _order_exec_qty(o)
-                            exit_price = float(exit_price_raw)
-                            exit_qty = float(exit_qty_raw)
-
-                            if exit_price <= 0:
-                                exit_price = float(op.entry_price)
-                            if exit_qty <= 0:
-                                exit_qty = float(op.qty)
-
-                            raw_missing = bool(exit_price_raw <= 0 or exit_qty_raw <= 0)
-                            enrich_valid = bool(exit_price > 0 and exit_qty > 0)
-                            if raw_missing and enrich_valid:
-                                self.emit_event(
-                                    [
-                                        {
-                                            "ts": _utcnow_iso(),
-                                            "type": "EXIT_ENRICH_FALLBACK",
-                                            "reason": "avg_price_or_qty_missing",
-                                            "exit_price_raw": float(exit_price_raw),
-                                            "exit_qty_raw": float(exit_qty_raw),
-                                        }
-                                    ]
-                                )
-
-                            self.state.open_position = None
-                            self.skip_cancel_open_orders_on_exit_runtime = False
-                            if not enrich_valid:
-                                self.emit_event(
-                                    [
-                                        {
-                                            "ts": _utcnow_iso(),
-                                            "type": "EXIT_ENRICH_FAILED",
-                                            "reason": "invalid_price_or_qty",
-                                            "exit_price_raw": float(exit_price_raw),
-                                            "exit_qty_raw": float(exit_qty_raw),
-                                        }
-                                    ]
-                                )
-                                self.store.append_trade_log(
-                                    event_type="EXIT",
-                                    symbol=closed_symbol,
-                                    side=closed_side,
-                                    qty=closed_qty,
-                                    price=None,
-                                    realized_pnl=None,
-                                    fee=None,
-                                    funding_applied=0.0,
-                                    reason=kind,
-                                    bar_time_utc=_utcnow_iso(),
-                                )
-                            else:
-                                # Fee semantics (Option A): realized_pnl is NET of fees.
-                                # EXIT.fee stores the round-trip taker fee for reference only.
-                                # Do not subtract fees again when summing realized_pnl.
-                                entry_notional = float(op.entry_price) * float(op.qty)
-                                exit_notional = float(exit_price) * float(exit_qty)
-                                round_trip_fee = (entry_notional + exit_notional) * float(self.taker_fee_rate)
-                                if str(op.side).upper() == "LONG":
-                                    gross_pnl = (float(exit_price) - float(op.entry_price)) * float(exit_qty)
-                                else:
-                                    gross_pnl = (float(op.entry_price) - float(exit_price)) * float(exit_qty)
-                                realized_pnl = float(gross_pnl - round_trip_fee)
-                                self.store.append_trade_log(
-                                    event_type="EXIT",
-                                    symbol=closed_symbol,
-                                    side=closed_side,
-                                    qty=float(exit_qty),
-                                    price=float(exit_price),
-                                    realized_pnl=float(realized_pnl),
-                                    fee=float(round_trip_fee),
-                                    funding_applied=0.0,
-                                    reason=kind,
-                                    bar_time_utc=_utcnow_iso(),
-                                )
-                            changed = True
-                            break
             except Exception as e:
+                leg["error"] = e
                 self.emit_event([{"ts": _utcnow_iso(), "type": "ORDER_POLL_FAILED", "order_id": int(oid), "error": str(e)}])
-        if changed:
-            self.persist_state()
+            legs[str(kind)] = leg
+        if not legs:
+            return
+
+        finished = [leg for kind in ("tp", "sl") if (leg := legs.get(kind)) is not None and str(leg.get("status") or "") == "FINISHED"]
+        terminal_non_finished = [
+            leg
+            for kind in ("tp", "sl")
+            if (leg := legs.get(kind)) is not None and str(leg.get("status") or "") in ("CANCELED", "REJECTED", "EXPIRED")
+        ]
+
+        if finished or terminal_non_finished:
+            try:
+                ex_side, ex_qty, _, _ = self.fetch_exchange_position()
+            except Exception as e:
+                self.skip_cancel_open_orders_on_exit_runtime = True
+                self._trigger_protection_kill_switch("KILL_SWITCH_PROTECTION_RUNTIME", f"position_recheck_failed:{e}")
+                return
+
+            if ex_side == "FLAT" or ex_qty < 1e-9:
+                statuses = {
+                    kind: ("ERROR" if leg.get("error") is not None else str(leg.get("status") or "UNKNOWN"))
+                    for kind, leg in legs.items()
+                    if str(leg.get("status") or "") != "" or leg.get("error") is not None
+                }
+                if len(finished) >= 2:
+                    self.emit_event(
+                        [
+                            {
+                                "ts": _utcnow_iso(),
+                                "type": "PROTECTION_RUNTIME_ANOMALY",
+                                "reason": "dual_finished",
+                                "statuses": statuses,
+                            }
+                        ]
+                    )
+                elif terminal_non_finished:
+                    self.emit_event(
+                        [
+                            {
+                                "ts": _utcnow_iso(),
+                                "type": "PROTECTION_RUNTIME_ANOMALY",
+                                "reason": "terminal_flat_race",
+                                "statuses": statuses,
+                            }
+                        ]
+                    )
+
+                exit_leg = self._choose_runtime_exit_leg(legs)
+                if exit_leg is None:
+                    self.skip_cancel_open_orders_on_exit_runtime = True
+                    self._trigger_protection_kill_switch(
+                        "KILL_SWITCH_PROTECTION_RUNTIME",
+                        f"flat_without_exit_leg:{statuses}",
+                    )
+                    return
+
+                sibling_kind = "sl" if str(exit_leg.get("kind") or "") == "tp" else "tp"
+                sibling_leg = legs.get(sibling_kind)
+                cleanup_error: Optional[Exception] = None
+                if sibling_leg is not None:
+                    sibling_status = str(sibling_leg.get("status") or "")
+                    sibling_terminal = self._is_algo_order_terminal_status(sibling_status)
+                    if sibling_leg.get("error") is not None or not sibling_terminal:
+                        cancel_algo_order = getattr(self.broker, "cancel_algo_order", None)
+                        if not callable(cancel_algo_order):
+                            cleanup_error = RuntimeError("cancel_algo_order_not_supported")
+                        else:
+                            try:
+                                cancel_algo_order(algo_id=int(sibling_leg.get("order_id")), symbol=self.symbol)
+                            except Exception as e:
+                                if not self._is_idempotent_cancel_error(e):
+                                    cleanup_error = e
+
+                self.emit_event([{"ts": _utcnow_iso(), "type": "POSITION_CLOSED", "via": str(exit_leg.get("kind") or "")}])
+                self._append_exit_trade_log_from_protection_order(
+                    op=op,
+                    order_payload=exit_leg.get("payload"),
+                    reason=str(exit_leg.get("kind") or ""),
+                )
+                self.state.open_position = None
+                self.skip_cancel_open_orders_on_exit_runtime = False
+                self.persist_state()
+                if cleanup_error is not None:
+                    self.emit_event(
+                        [
+                            {
+                                "ts": _utcnow_iso(),
+                                "type": "PROTECTION_SIBLING_CANCEL_FAILED",
+                                "via": str(exit_leg.get("kind") or ""),
+                                "sibling_kind": str(sibling_kind),
+                                "order_id": int(sibling_leg.get("order_id")) if sibling_leg is not None else 0,
+                                "error": str(cleanup_error),
+                            }
+                        ]
+                    )
+                    self._trigger_protection_kill_switch(
+                        "KILL_SWITCH_PROTECTION_RUNTIME",
+                        f"sibling_cancel_failed:{exit_leg.get('kind')}:{sibling_kind}:{cleanup_error}",
+                    )
+                return
+
+            detail_statuses = ",".join(
+                f"{str(kind)}:{str(leg.get('status') or 'UNKNOWN')}"
+                for kind, leg in legs.items()
+                if self._is_algo_order_terminal_status(str(leg.get("status") or ""))
+            )
+            if finished:
+                self.skip_cancel_open_orders_on_exit_runtime = True
+                self._trigger_protection_kill_switch(
+                    "KILL_SWITCH_PROTECTION_RUNTIME",
+                    f"finished_but_exchange_open:{detail_statuses};exchange_side={ex_side};exchange_qty={ex_qty}",
+                )
+                return
+            if terminal_non_finished:
+                self.skip_cancel_open_orders_on_exit_runtime = True
+                self._trigger_protection_kill_switch(
+                    "KILL_SWITCH_PROTECTION_RUNTIME",
+                    f"terminal_but_exchange_open:{detail_statuses};exchange_side={ex_side};exchange_qty={ex_qty}",
+                )
+                return
+
+        poll_errors = [leg for leg in legs.values() if leg.get("error") is not None]
+        if poll_errors:
+            detail = ";".join(
+                f"{str(leg.get('kind') or '')}:{str(leg.get('error') or '')}"
+                for leg in poll_errors
+            )
+            self.skip_cancel_open_orders_on_exit_runtime = True
+            self._trigger_protection_kill_switch(
+                "KILL_SWITCH_PROTECTION_RUNTIME",
+                f"order_poll_failed:{detail}",
+            )
 
     def maybe_kill_on_margin_ratio(self) -> None:
         try:

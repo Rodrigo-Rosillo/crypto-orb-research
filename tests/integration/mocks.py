@@ -31,6 +31,8 @@ class FakeBinanceClient:
         fail_get_algo_open_orders: bool = False,
         server_time_payload: Optional[dict[str, Any]] = None,
         fail_server_time: bool = False,
+        algo_order_error_by_id: Optional[dict[int, Exception]] = None,
+        cancel_algo_error_by_id: Optional[dict[int, Exception]] = None,
     ) -> None:
         self.reject_entry = bool(reject_entry)
         self.simulate_partial_fill_poll = bool(simulate_partial_fill_poll)
@@ -47,10 +49,14 @@ class FakeBinanceClient:
         self.fail_get_algo_open_orders = bool(fail_get_algo_open_orders)
         self.server_time_payload = server_time_payload
         self.fail_server_time = bool(fail_server_time)
+        self.algo_order_error_by_id = dict(algo_order_error_by_id or {})
+        self.cancel_algo_error_by_id = dict(cancel_algo_error_by_id or {})
 
         self.cancel_all_called = False
         self.cancel_all_call_count = 0
         self.last_cancel_all_symbol: Optional[str] = None
+        self.cancel_algo_calls: list[int] = []
+        self.cancelled_algo_ids: list[int] = []
         self.position_risk_call_count = 0
 
         self._next_id = 1000
@@ -240,6 +246,9 @@ class FakeBinanceClient:
         return {"algoId": int(algo_id), "status": "NEW"}
 
     def get_algo_order(self, *, symbol: str, algo_id: int) -> Any:
+        error = self.algo_order_error_by_id.get(int(algo_id))
+        if error is not None:
+            raise error
         row = dict(self._algo_rows.get(int(algo_id), {}))
         if not row:
             row = {
@@ -249,6 +258,21 @@ class FakeBinanceClient:
             }
         row["status"] = self._algo_status.get(int(algo_id), str(row.get("status") or "NEW"))
         return row
+
+    def cancel_algo_order(self, *, algo_id: int, symbol: Optional[str] = None) -> Any:
+        _ = symbol
+        oid = int(algo_id)
+        self.cancel_algo_calls.append(oid)
+        error = self.cancel_algo_error_by_id.get(oid)
+        if error is not None:
+            raise error
+        self.cancelled_algo_ids.append(oid)
+        self._algo_status[oid] = "CANCELED"
+        row = dict(self._algo_rows.get(oid, {}))
+        row["algoId"] = oid
+        row["status"] = "CANCELED"
+        self._algo_rows[oid] = row
+        return {"algoId": oid, "status": "CANCELED"}
 
     def get_algo_open_orders(self, *, symbol: str) -> Any:
         if self.fail_get_algo_open_orders:
