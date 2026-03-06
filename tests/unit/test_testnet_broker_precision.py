@@ -11,6 +11,7 @@ from forward.testnet_broker import (
     BinanceFuturesTestnetBroker,
     OrderValidationError,
     TestnetAPIError,
+    classify_submit_error,
     floor_to_step,
     format_decimal,
 )
@@ -60,6 +61,38 @@ def test_floor_to_step_and_format_decimal() -> None:
     assert floored == Decimal("24.087")
     assert format_decimal(floored) == "24.087"
     assert format_decimal(Decimal("1E-8")) == "0.00000001"
+
+
+def test_classify_submit_error_unknown_400_is_ambiguous() -> None:
+    err = TestnetAPIError(
+        "Binance API error HTTP 400 code=-9999 msg=unexpected submit failure",
+        status_code=400,
+        payload={"code": -9999, "msg": "unexpected submit failure"},
+    )
+    assert classify_submit_error(err) == "ambiguous"
+
+
+def test_classify_submit_error_new_order_rejected_is_definitive_reject() -> None:
+    err = TestnetAPIError(
+        "Binance API error HTTP 400 code=-2010 msg=NEW_ORDER_REJECTED",
+        status_code=400,
+        payload={"code": -2010, "msg": "NEW_ORDER_REJECTED"},
+    )
+    assert classify_submit_error(err) == "definitive_reject"
+
+
+def test_classify_submit_error_rate_limit_is_transient_system() -> None:
+    err = TestnetAPIError(
+        "Binance API error HTTP 429 code=-1003 msg=Too many requests",
+        status_code=429,
+        payload={"code": -1003, "msg": "Too many requests"},
+    )
+    assert classify_submit_error(err) == "transient_system"
+
+
+def test_classify_submit_error_http_500_is_ambiguous() -> None:
+    err = TestnetAPIError("Binance API error HTTP 500", status_code=500, payload={})
+    assert classify_submit_error(err) == "ambiguous"
 
 
 def test_quantize_qty_uses_market_lot_size_for_market_orders() -> None:

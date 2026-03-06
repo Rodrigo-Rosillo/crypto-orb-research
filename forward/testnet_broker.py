@@ -149,8 +149,6 @@ def classify_submit_error(error: TestnetAPIError) -> SubmitErrorKind:
         return "transient_system"
     if status_code in (401, 403, 418, 429):
         return "transient_system"
-    if status_code is not None and status_code >= 500:
-        return "transient_system"
 
     msg = str(error).lower()
     for marker in (
@@ -164,8 +162,10 @@ def classify_submit_error(error: TestnetAPIError) -> SubmitErrorKind:
         if marker in msg:
             return "transient_system"
 
-    if status_code == 400:
+    if status_code == 400 and code == -2010:
         return "definitive_reject"
+    if status_code == 400:
+        return "ambiguous"
     return "transient_system"
 
 
