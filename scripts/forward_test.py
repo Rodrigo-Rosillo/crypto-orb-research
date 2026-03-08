@@ -39,7 +39,7 @@ from forward.shadow import run_shadow_futures  # noqa: E402
 from forward.live_shadow import run_live_shadow  # noqa: E402
 from forward.live_testnet import run_live_testnet  # noqa: E402
 from forward.schemas import FILLS_COLUMNS, ORDERS_COLUMNS, POSITIONS_COLUMNS, SIGNALS_COLUMNS, validate_df_columns  # noqa: E402
-from forward.utils import ensure_repo_path, maybe_get_forward_cfg, parse_hhmm, parse_utc_ts, utc_run_id  # noqa: E402
+from forward.utils import ensure_repo_path, maybe_get_forward_cfg, parse_utc_ts, utc_run_id  # noqa: E402
 
 
 def sha256_text(text: str) -> str:
@@ -293,19 +293,6 @@ def main() -> int:
         symbol = str(cfg.get("symbol", "SOLUSDT"))
         timeframe = str(cfg.get("timeframe", "30m"))
 
-        orb_start = parse_hhmm(cfg["orb"]["start"])
-        orb_end = parse_hhmm(cfg["orb"]["end"])
-        orb_cutoff = parse_hhmm(cfg["orb"]["cutoff"])
-
-        adx_period = int(cfg["adx"]["period"])
-        adx_threshold = float(cfg["adx"]["threshold"])
-
-        initial_capital = float(cfg["risk"]["initial_capital"])
-        position_size = float(cfg["risk"]["position_size"])
-        taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
-
-        leverage = _parse_leverage(cfg)
-
         exec_cfg = (ft_cfg.get("execution_model") or {}) if isinstance(ft_cfg, dict) else {}
         delay_bars = int(exec_cfg.get("delay_bars", 1))
         slippage_bps = float(exec_cfg.get("slippage_bps", 0.0))
@@ -345,15 +332,7 @@ def main() -> int:
         shadow_res = run_shadow_futures(
             df_raw=df_raw,
             valid_days=valid_days,
-            orb_start=orb_start,
-            orb_end=orb_end,
-            orb_cutoff=orb_cutoff,
-            adx_period=adx_period,
-            adx_threshold=adx_threshold,
-            initial_capital=initial_capital,
-            position_size=position_size,
-            taker_fee_rate=taker_fee_rate,
-            leverage=leverage,
+            cfg=cfg,
             delay_bars=delay_bars,
             slippage_bps=slippage_bps,
             fee_mult=1.0,
@@ -419,13 +398,6 @@ def main() -> int:
         symbol = str(cfg.get("symbol", "SOLUSDT"))
         timeframe = str(cfg.get("timeframe", "30m"))
 
-        orb_start = parse_hhmm(cfg["orb"]["start"])
-        orb_end = parse_hhmm(cfg["orb"]["end"])
-        orb_cutoff = parse_hhmm(cfg["orb"]["cutoff"])
-
-        adx_period = int(cfg["adx"]["period"])
-        adx_threshold = float(cfg["adx"]["threshold"])
-
         initial_capital = float(cfg["risk"]["initial_capital"])
         position_size = float(cfg["risk"]["position_size"])
         taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
@@ -452,11 +424,6 @@ def main() -> int:
                     risk_limits=risk_limits,
                     symbol=symbol,
                     timeframe=timeframe,
-                    orb_start=orb_start,
-                    orb_end=orb_end,
-                    orb_cutoff=orb_cutoff,
-                    adx_period=adx_period,
-                    adx_threshold=adx_threshold,
                     initial_capital=initial_capital,
                     position_size=position_size,
                     taker_fee_rate=taker_fee_rate,
@@ -478,13 +445,6 @@ def main() -> int:
 
         symbol = str(cfg.get("symbol", "SOLUSDT"))
         timeframe = str(cfg.get("timeframe", "30m"))
-
-        orb_start = parse_hhmm(cfg["orb"]["start"])
-        orb_end = parse_hhmm(cfg["orb"]["end"])
-        orb_cutoff = parse_hhmm(cfg["orb"]["cutoff"])
-
-        adx_period = int(cfg["adx"]["period"])
-        adx_threshold = float(cfg["adx"]["threshold"])
 
         initial_capital = float(cfg["risk"]["initial_capital"])
         position_size = float(cfg["risk"]["position_size"])
@@ -510,11 +470,6 @@ def main() -> int:
                     risk_limits=risk_limits,
                     symbol=symbol,
                     timeframe=timeframe,
-                    orb_start=orb_start,
-                    orb_end=orb_end,
-                    orb_cutoff=orb_cutoff,
-                    adx_period=adx_period,
-                    adx_threshold=adx_threshold,
                     initial_capital=initial_capital,
                     position_size=position_size,
                     taker_fee_rate=taker_fee_rate,

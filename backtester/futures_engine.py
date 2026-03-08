@@ -32,7 +32,7 @@ class FuturesEngineConfig:
 
 def backtest_futures_orb(
     df: pd.DataFrame,
-    orb_ranges: pd.DataFrame,
+    orb_ranges: Optional[pd.DataFrame] = None,
     valid_days: Optional[set] = None,
     cfg: Optional[FuturesEngineConfig] = None,
     risk_limits: Optional[RiskLimits] = None,
@@ -46,7 +46,7 @@ def backtest_futures_orb(
       signal_type (str)
     Index must be UTC timestamps.
 
-    Expected orb_ranges:
+    Expected orb_ranges when provided:
       index is python date; columns: orb_high, orb_low
 
     Returns:
@@ -80,9 +80,17 @@ def backtest_futures_orb(
 
         orb_high: Optional[float] = None
         orb_low: Optional[float] = None
-        if current_date in orb_ranges.index:
-            orb_high = float(orb_ranges.loc[current_date, "orb_high"])
-            orb_low = float(orb_ranges.loc[current_date, "orb_low"])
+        if "orb_high" in df.columns and not pd.isna(df["orb_high"].iloc[i]):
+            orb_high = float(df["orb_high"].iloc[i])
+        if "orb_low" in df.columns and not pd.isna(df["orb_low"].iloc[i]):
+            orb_low = float(df["orb_low"].iloc[i])
+
+        if orb_high is None or orb_low is None:
+            if orb_ranges is not None and not orb_ranges.empty and current_date in orb_ranges.index:
+                if orb_high is None:
+                    orb_high = float(orb_ranges.loc[current_date, "orb_high"])
+                if orb_low is None:
+                    orb_low = float(orb_ranges.loc[current_date, "orb_low"])
 
         # Backtester-only bound check stays in adapter: don't schedule past final bar.
         allow_schedule = (i + int(core.delay_bars)) < len(df)

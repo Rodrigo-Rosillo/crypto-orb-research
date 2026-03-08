@@ -27,7 +27,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.utils import load_valid_days_csv, parse_hhmm, sha256_file, stable_json  # noqa: E402
-from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
+from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges, load_signal_rules_from_config  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
 from backtester.risk import risk_limits_from_config  # noqa: E402
 
@@ -183,6 +183,7 @@ def run_backtest_one(
     fee_mult: float,
     slippage_bps: float,
     delay_bars: int,
+    risk_limits,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Any], Dict[str, Any]]:
     """
     Returns (trades_df, equity_df, metrics, extra)
@@ -352,6 +353,12 @@ def main() -> int:
 
     cfg_text = config_path.read_text(encoding="utf-8")
     cfg = yaml.safe_load(cfg_text) or {}
+    rules = load_signal_rules_from_config(cfg)
+    if len(rules) > 1:
+        raise ValueError(
+            "walk_forward_tune currently supports only legacy single-rule configs; "
+            "multi-rule signals.rules configs are not supported."
+        )
 
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
@@ -362,7 +369,7 @@ def main() -> int:
     taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
 
     # Phase 4 risk controls (parsed here for consistency with run config).
-    _ = risk_limits_from_config(cfg)
+    risk_limits = risk_limits_from_config(cfg)
 
     # Load parquet
     data_path = Path(args.data) if args.data else Path(f"data/processed/{symbol}_{timeframe}.parquet")
@@ -452,6 +459,7 @@ def main() -> int:
                     fee_mult=float(args.fee_mult),
                     slippage_bps=float(args.slippage_bps),
                     delay_bars=int(args.delay_bars),
+                    risk_limits=risk_limits,
                 )
 
                 grid_rows.append(
@@ -509,6 +517,7 @@ def main() -> int:
                 fee_mult=float(args.fee_mult),
                 slippage_bps=float(args.slippage_bps),
                 delay_bars=int(args.delay_bars),
+                risk_limits=risk_limits,
             )
             tr_trades_df.to_csv(fold_dir / "train_chosen_trades.csv", index=False)
             tr_equity_df.to_csv(fold_dir / "train_chosen_equity_curve.csv", index=False)
@@ -533,6 +542,7 @@ def main() -> int:
             fee_mult=float(args.fee_mult),
             slippage_bps=float(args.slippage_bps),
             delay_bars=int(args.delay_bars),
+            risk_limits=risk_limits,
         )
 
         te_trades_df.to_csv(fold_dir / "test_trades.csv", index=False)
@@ -590,7 +600,7 @@ def main() -> int:
         )
 
         print(
-            f"✅ {fold_id} | chosen={chosen_id} | TRAIN {args.objective}={chosen[args.objective]:.3f} | "
+            f"[OK] {fold_id} | chosen={chosen_id} | TRAIN {args.objective}={chosen[args.objective]:.3f} | "
             f"TEST sharpe={te_metrics['daily_sharpe']:.3f} ret={te_metrics['total_return_pct']:.1f}%"
         )
 

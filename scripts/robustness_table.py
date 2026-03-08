@@ -29,7 +29,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.utils import load_valid_days_csv, parse_hhmm, sha256_file, stable_json  # noqa: E402
-from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
+from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges, load_signal_rules_from_config  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
 from backtester.risk import risk_limits_from_config  # noqa: E402
 
@@ -256,6 +256,12 @@ def main() -> int:
     # Load config
     cfg_text = config_path.read_text(encoding="utf-8")
     cfg = yaml.safe_load(cfg_text) or {}
+    rules = load_signal_rules_from_config(cfg)
+    if len(rules) > 1:
+        raise ValueError(
+            "robustness_table currently supports only legacy single-rule configs; "
+            "multi-rule signals.rules configs are not supported."
+        )
 
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
@@ -477,7 +483,7 @@ def main() -> int:
                 outputs[f"scenarios/{sid}/equity_curve.png"] = str(plot_path)
 
             print(
-                f"✅ {sid} | sharpe={metrics['daily_sharpe']:.2f} | ret={metrics['total_return_pct']:.1f}% | dd={metrics['max_drawdown_pct']:.1f}%"
+                f"[OK] {sid} | sharpe={metrics['daily_sharpe']:.2f} | ret={metrics['total_return_pct']:.1f}% | dd={metrics['max_drawdown_pct']:.1f}%"
             )
 
         if args.max_scenarios and scenario_count >= int(args.max_scenarios):

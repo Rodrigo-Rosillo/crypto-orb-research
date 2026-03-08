@@ -27,8 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.utils import load_valid_days_csv, parse_hhmm, sha256_file, stable_json  # noqa: E402
-from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
+from core.utils import load_valid_days_csv, sha256_file, stable_json  # noqa: E402
+from strategy import build_signals_from_config, serialize_signal_rules  # noqa: E402
 
 # Futures engine (Phase 2)
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
@@ -165,6 +165,12 @@ def maybe_write_equity_plot(equity_df: pd.DataFrame, out_path: Path) -> None:
         return
 
 
+def single_rule_orb_ranges(rule_orb_ranges_df: pd.DataFrame) -> pd.DataFrame:
+    orb_out = rule_orb_ranges_df.loc[:, ["date", "orb_high", "orb_low"]].copy()
+    orb_out = orb_out.drop_duplicates(subset=["date"]).set_index("date").sort_index()
+    return orb_out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Run ORB backtest (deterministic) with engine switch")
     ap.add_argument("--config", default="config.yaml", help="Path to config.yaml (relative to repo root by default)")
@@ -189,7 +195,7 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.engine == "futures" and args.leverage != 1.0:
-        print(f"⚠️  Running futures with leverage={args.leverage} (default research baseline is 1x).")
+        print(f"[WARN] Running futures with leverage={args.leverage} (default research baseline is 1x).")
 
 
     config_path = Path(args.config)
@@ -218,12 +224,7 @@ def main() -> int:
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
 
-    orb_start = parse_hhmm(cfg["orb"]["start"])
-    orb_end = parse_hhmm(cfg["orb"]["end"])
-    orb_cutoff = parse_hhmm(cfg["orb"]["cutoff"])
-
     adx_period = int(cfg["adx"]["period"])
-    adx_threshold = float(cfg["adx"]["threshold"])
 
     initial_capital = float(cfg["risk"]["initial_capital"])
     position_size = float(cfg["risk"]["position_size"])
@@ -258,22 +259,8 @@ def main() -> int:
         )
         print(f"[OK] Loaded candles: {len(df_raw)}  ({symbol} {timeframe})  [raw CSVs]")
 
-# Strategy pipeline
-    df_ind = add_trend_indicators(df_raw, period=adx_period)
-    orb_ranges = identify_orb_ranges(df_ind, orb_start_time=orb_start, orb_end_time=orb_end)
-    orb_ranges = orb_ranges.loc[orb_ranges.index.isin(valid_days)]  # enforce valid day definition
-
-    df_sig = generate_orb_signals(
-        df_ind,
-        orb_ranges=orb_ranges,
-        adx_threshold=adx_threshold,
-        orb_cutoff_time=orb_cutoff,
-    )
-
-    # Zero out signals on invalid days (keeps candles but blocks entries)
-    invalid_mask = ~df_sig["date"].isin(valid_days)
-    df_sig.loc[invalid_mask, "signal"] = 0
-    df_sig.loc[invalid_mask, "signal_type"] = ""
+    df_sig, rule_orb_ranges_df, rules = build_signals_from_config(df_raw, cfg, valid_days)
+    multi_rule = len(rules) > 1
 
     # Run engine
     engine = args.engine
@@ -293,7 +280,7 @@ def main() -> int:
 
         trades, equity_curve, final_capital, total_fees_paid = backtest_orb_strategy(
             df=df_sig,
-            orb_ranges=orb_ranges,
+            orb_ranges=None,
             initial_capital=initial_capital,
             position_size=position_size,
             taker_fee_rate=taker_fee_rate,
@@ -326,7 +313,7 @@ def main() -> int:
         )
         trades, equity_curve, stats = backtest_futures_orb(
             df=df_sig,
-            orb_ranges=orb_ranges,
+            orb_ranges=None,
             valid_days=valid_days,
             cfg=engine_cfg,
             risk_limits=risk_limits,
@@ -375,7 +362,6 @@ def main() -> int:
     results_path = out_dir / "results.json"
     trades_path = out_dir / "trades.csv"
     equity_path = out_dir / "equity_curve.csv"
-    orb_path = out_dir / "orb_ranges.csv"
     meta_path = out_dir / "run_metadata.json"
     hashes_path = out_dir / "hashes.json"
     plot_path = out_dir / "equity_curve.png"
@@ -383,11 +369,47 @@ def main() -> int:
     trades_df.to_csv(trades_path, index=False)
     equity_df.to_csv(equity_path, index=False)
 
-    orb_out = orb_ranges.copy()
-    orb_out.index = orb_out.index.astype(str)
-    orb_out.to_csv(orb_path, index_label="date_utc")
+    artifact_outputs: Dict[str, str] = {}
+    if multi_rule:
+        rule_orb_path = out_dir / "rule_orb_ranges.csv"
+        rule_orb_out = rule_orb_ranges_df.copy()
+        if "date" in rule_orb_out.columns:
+            rule_orb_out["date"] = rule_orb_out["date"].astype(str)
+        rule_orb_out.to_csv(rule_orb_path, index=False)
+        artifact_outputs["rule_orb_ranges.csv"] = str(rule_orb_path)
+    else:
+        orb_path = out_dir / "orb_ranges.csv"
+        orb_out = single_rule_orb_ranges(rule_orb_ranges_df)
+        orb_out.index = orb_out.index.astype(str)
+        orb_out.to_csv(orb_path, index_label="date_utc")
+        artifact_outputs["orb_ranges.csv"] = str(orb_path)
 
     maybe_write_equity_plot(equity_df, plot_path)
+
+    params: Dict[str, Any] = {
+        "adx_period": adx_period,
+        "strategy_rules": serialize_signal_rules(rules),
+        "initial_capital": initial_capital,
+        "position_size": position_size,
+        "taker_fee_rate": taker_fee_rate,
+        "fee_mult": float(args.fee_mult),
+        "slippage_bps": float(args.slippage_bps),
+        "delay_bars": int(args.delay_bars),
+        "leverage": float(args.leverage),
+        "mmr": float(args.mmr),
+        "funding_per_8h": float(args.funding_per_8h),
+        "risk_controls": risk_limits.to_dict() if hasattr(risk_limits, "to_dict") else {},
+    }
+    if not multi_rule:
+        only_rule = rules[0]
+        params.update(
+            {
+                "orb_start": only_rule.orb_start.strftime("%H:%M"),
+                "orb_end": only_rule.orb_end.strftime("%H:%M"),
+                "orb_cutoff": only_rule.orb_cutoff.strftime("%H:%M"),
+                "adx_threshold": only_rule.adx_threshold,
+            }
+        )
 
     results: Dict[str, Any] = {
         "symbol": symbol,
@@ -405,25 +427,7 @@ def main() -> int:
             "processed_parquet_path": str(processed_path) if processed_path.exists() else None,
             "processed_parquet_sha256": sha256_file(processed_path) if processed_path.exists() else None,
         },
-        "params": {
-            "orb_start": cfg["orb"]["start"],
-            "orb_end": cfg["orb"]["end"],
-            "orb_cutoff": cfg["orb"]["cutoff"],
-            "adx_period": adx_period,
-            "adx_threshold": adx_threshold,
-            "initial_capital": initial_capital,
-            "position_size": position_size,
-            "taker_fee_rate": taker_fee_rate,
-            # phase 2 switches:
-            "fee_mult": float(args.fee_mult),
-            "slippage_bps": float(args.slippage_bps),
-            "delay_bars": int(args.delay_bars),
-            # futures knobs:
-            "leverage": float(args.leverage),
-            "mmr": float(args.mmr),
-            "funding_per_8h": float(args.funding_per_8h),
-            "risk_controls": risk_limits.to_dict() if hasattr(risk_limits, "to_dict") else {},
-        },
+        "params": params,
         "signal_type_counts": signal_type_counts,
         "metrics": {
             "Initial Capital": float(initial_capital),
@@ -451,10 +455,10 @@ def main() -> int:
         "results.json": str(results_path),
         "trades.csv": str(trades_path),
         "equity_curve.csv": str(equity_path),
-        "orb_ranges.csv": str(orb_path),
         "run_metadata.json": str(meta_path),
         "hashes.json": str(hashes_path),
     }
+    outputs.update(artifact_outputs)
     if plot_path.exists():
         outputs["equity_curve.png"] = str(plot_path)
 

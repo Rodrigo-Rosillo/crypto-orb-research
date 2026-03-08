@@ -42,11 +42,6 @@ async def run_live_shadow(
     risk_limits: Optional[RiskLimits],
     symbol: str,
     timeframe: str,
-    orb_start,
-    orb_end,
-    orb_cutoff,
-    adx_period: int,
-    adx_threshold: float,
     initial_capital: float,
     position_size: float,
     taker_fee_rate: float,
@@ -295,14 +290,10 @@ async def run_live_shadow(
 
             # Recompute signals on the current history window (slow but fine for 30m cadence)
             valid_days = set(df_raw.index.date)
-            df_sig, orb_ranges = build_signals(
+            df_sig, _, _ = build_signals(
                 df_raw=df_raw,
                 valid_days=valid_days,
-                orb_start=orb_start,
-                orb_end=orb_end,
-                orb_cutoff=orb_cutoff,
-                adx_period=adx_period,
-                adx_threshold=adx_threshold,
+                cfg=cfg,
             )
 
             if bar.open_time not in df_sig.index:

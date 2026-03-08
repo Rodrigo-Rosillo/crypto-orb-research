@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 *.ipynb_checkpoints
+reports/
 reports/scenarios/futures/
 reports/scenarios/spot/
 reports/walk_forward_tune/folds/

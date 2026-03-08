@@ -4,6 +4,7 @@ import os
 os.environ["PYTHONHASHSEED"] = "0"
 
 import argparse
+import copy
 import hashlib
 import platform
 import random
@@ -25,8 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.utils import load_valid_days_csv, parse_hhmm, sha256_file, stable_json  # noqa: E402
-from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges
+from core.utils import load_valid_days_csv, sha256_file, stable_json  # noqa: E402
+from strategy import build_signals_from_config, load_signal_rules_from_config, serialize_signal_rules
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb
 from backtester.risk import risk_limits_from_config
 
@@ -159,6 +160,12 @@ def generate_folds(
     return folds
 
 
+def single_rule_orb_ranges(rule_orb_ranges_df: pd.DataFrame) -> pd.DataFrame:
+    orb_out = rule_orb_ranges_df.loc[:, ["date", "orb_high", "orb_low"]].copy()
+    orb_out = orb_out.drop_duplicates(subset=["date"]).set_index("date").sort_index()
+    return orb_out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Phase 3: walk-forward evaluation (rolling train/test windows)")
     ap.add_argument("--config", default="config.yaml")
@@ -207,13 +214,10 @@ def main() -> int:
 
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
-
-    orb_start = parse_hhmm(cfg["orb"]["start"])
-    orb_end = parse_hhmm(cfg["orb"]["end"])
-    orb_cutoff = parse_hhmm(cfg["orb"]["cutoff"])
-
+    rules = load_signal_rules_from_config(cfg)
+    multi_rule = len(rules) > 1
     adx_period = int(cfg["adx"]["period"])
-    base_adx_threshold = float(cfg["adx"]["threshold"])
+    base_adx_threshold = float(rules[0].adx_threshold) if len(rules) == 1 else None
 
     initial_capital = float(cfg["risk"]["initial_capital"])
     position_size = float(cfg["risk"]["position_size"])
@@ -240,12 +244,13 @@ def main() -> int:
     start_ts = pd.to_datetime(args.start, utc=True) if args.start else df.index.min()
     end_ts = pd.to_datetime(args.end, utc=True) if args.end else df.index.max()
 
-    # Precompute indicators + ORB ranges once
-    df_ind = add_trend_indicators(df, period=adx_period)
-    orb_ranges_all = identify_orb_ranges(df_ind, orb_start_time=orb_start, orb_end_time=orb_end)
-
     tune_list: List[float] = []
     if args.tune_adx_threshold.strip():
+        if multi_rule:
+            raise ValueError(
+                "--tune-adx-threshold is only supported for legacy single-rule configs; "
+                "multi-rule signals.rules configs are not supported."
+            )
         tune_list = [float(x.strip()) for x in args.tune_adx_threshold.split(",") if x.strip()]
         tune_list = sorted(set(tune_list))
 
@@ -269,8 +274,8 @@ def main() -> int:
         train_start, train_end = f["train_start"], f["train_end"]
         test_start, test_end = f["test_start"], f["test_end"]
 
-        df_train = df_ind[(df_ind.index >= train_start) & (df_ind.index < train_end)]
-        df_test = df_ind[(df_ind.index >= test_start) & (df_ind.index < test_end)]
+        df_train = df[(df.index >= train_start) & (df.index < train_end)]
+        df_test = df[(df.index >= test_start) & (df.index < test_end)]
 
         train_days = set(pd.Series(df_train.index.normalize().date).unique())
         test_days = set(pd.Series(df_test.index.normalize().date).unique())
@@ -278,24 +283,15 @@ def main() -> int:
         valid_train_days = valid_days_all.intersection(train_days)
         valid_test_days = valid_days_all.intersection(test_days)
 
-        orb_train = orb_ranges_all.loc[orb_ranges_all.index.isin(valid_train_days)]
-        orb_test = orb_ranges_all.loc[orb_ranges_all.index.isin(valid_test_days)]
-
         chosen_adx = base_adx_threshold
         tune_table: List[Dict[str, Any]] = []
 
         if tune_list:
             best_score = -1e18
             for thr in tune_list:
-                train_sig = generate_orb_signals(
-                    df_train,
-                    orb_ranges=orb_train,
-                    adx_threshold=float(thr),
-                    orb_cutoff_time=orb_cutoff,
-                )
-                invalid_mask = ~train_sig["date"].isin(valid_train_days)
-                train_sig.loc[invalid_mask, "signal"] = 0
-                train_sig.loc[invalid_mask, "signal_type"] = ""
+                cfg_tuned = copy.deepcopy(cfg)
+                cfg_tuned.setdefault("adx", {})["threshold"] = float(thr)
+                train_sig, _, _ = build_signals_from_config(df_train, cfg_tuned, valid_train_days)
 
                 if args.engine == "futures":
                     cfg_eng = FuturesEngineConfig(
@@ -311,7 +307,7 @@ def main() -> int:
                     )
                     trades, equity_curve, stats = backtest_futures_orb(
                         df=train_sig,
-                        orb_ranges=orb_train,
+                        orb_ranges=None,
                         valid_days=valid_train_days,
                         cfg=cfg_eng,
                         risk_limits=risk_limits,
@@ -330,7 +326,7 @@ def main() -> int:
                     assert spot_engine is not None
                     trades, equity_curve, _, total_fees = spot_engine(
                         df=train_sig,
-                        orb_ranges=orb_train,
+                        orb_ranges=None,
                         initial_capital=initial_capital,
                         position_size=position_size,
                         taker_fee_rate=taker_fee_rate,
@@ -353,15 +349,14 @@ def main() -> int:
                 stable_json({"tune": tune_table, "chosen_adx": chosen_adx}), encoding="utf-8"
             )
 
-        test_sig = generate_orb_signals(
+        cfg_test = copy.deepcopy(cfg)
+        if chosen_adx is not None and len(rules) == 1:
+            cfg_test.setdefault("adx", {})["threshold"] = float(chosen_adx)
+        test_sig, test_rule_orb_ranges_df, test_rules = build_signals_from_config(
             df_test,
-            orb_ranges=orb_test,
-            adx_threshold=float(chosen_adx),
-            orb_cutoff_time=orb_cutoff,
+            cfg_test,
+            valid_test_days,
         )
-        invalid_mask = ~test_sig["date"].isin(valid_test_days)
-        test_sig.loc[invalid_mask, "signal"] = 0
-        test_sig.loc[invalid_mask, "signal_type"] = ""
 
         total_fees = 0.0
         total_funding = 0.0
@@ -382,7 +377,7 @@ def main() -> int:
             )
             trades, equity_curve, stats = backtest_futures_orb(
                 df=test_sig,
-                orb_ranges=orb_test,
+                orb_ranges=None,
                 valid_days=valid_test_days,
                 cfg=cfg_eng,
                 risk_limits=risk_limits,
@@ -395,7 +390,7 @@ def main() -> int:
             assert spot_engine is not None
             trades, equity_curve, _, total_fees = spot_engine(
                 df=test_sig,
-                orb_ranges=orb_test,
+                orb_ranges=None,
                 initial_capital=initial_capital,
                 position_size=position_size,
                 taker_fee_rate=taker_fee_rate,
@@ -411,6 +406,38 @@ def main() -> int:
 
         trades_df.to_csv(fold_out / "trades.csv", index=False)
         equity_df.to_csv(fold_out / "equity_curve.csv", index=False)
+        if len(test_rules) > 1:
+            rule_orb_path = fold_out / "rule_orb_ranges.csv"
+            rule_orb_out = test_rule_orb_ranges_df.copy()
+            if "date" in rule_orb_out.columns:
+                rule_orb_out["date"] = rule_orb_out["date"].astype(str)
+            rule_orb_out.to_csv(rule_orb_path, index=False)
+        else:
+            orb_path = fold_out / "orb_ranges.csv"
+            orb_out = single_rule_orb_ranges(test_rule_orb_ranges_df)
+            orb_out.index = orb_out.index.astype(str)
+            orb_out.to_csv(orb_path, index_label="date_utc")
+
+        result_params: Dict[str, Any] = {
+            "adx_period": adx_period,
+            "strategy_rules": serialize_signal_rules(test_rules),
+            "fee_mult": float(args.fee_mult),
+            "slippage_bps": float(args.slippage_bps),
+            "delay_bars": int(args.delay_bars),
+            "leverage": float(args.leverage),
+            "mmr": float(args.mmr),
+            "funding_per_8h": float(args.funding_per_8h),
+        }
+        if len(test_rules) == 1:
+            only_rule = test_rules[0]
+            result_params.update(
+                {
+                    "orb_start": only_rule.orb_start.strftime("%H:%M"),
+                    "orb_end": only_rule.orb_end.strftime("%H:%M"),
+                    "orb_cutoff": only_rule.orb_cutoff.strftime("%H:%M"),
+                    "adx_threshold": only_rule.adx_threshold,
+                }
+            )
         (fold_out / "results.json").write_text(
             stable_json(
                 {
@@ -424,15 +451,8 @@ def main() -> int:
                         "test_start": test_start.isoformat(),
                         "test_end": test_end.isoformat(),
                     },
-                    "chosen_adx_threshold": float(chosen_adx),
-                    "params": {
-                        "fee_mult": float(args.fee_mult),
-                        "slippage_bps": float(args.slippage_bps),
-                        "delay_bars": int(args.delay_bars),
-                        "leverage": float(args.leverage),
-                        "mmr": float(args.mmr),
-                        "funding_per_8h": float(args.funding_per_8h),
-                    },
+                    "chosen_adx_threshold": float(chosen_adx) if chosen_adx is not None else None,
+                    "params": result_params,
                     "metrics": metrics,
                     "engine_stats": engine_stats,
                 }
@@ -447,14 +467,14 @@ def main() -> int:
                 "train_end": (train_end - pd.Timedelta(seconds=1)).date().isoformat(),
                 "test_start": test_start.date().isoformat(),
                 "test_end": (test_end - pd.Timedelta(seconds=1)).date().isoformat(),
-                "chosen_adx_threshold": float(chosen_adx),
+                "chosen_adx_threshold": float(chosen_adx) if chosen_adx is not None else None,
                 **metrics,
                 "fold_dir": str(fold_out),
             }
         )
 
         print(
-            f"✅ {fold_id} TEST {test_start.date()}→{(test_end - pd.Timedelta(days=1)).date()} | "
+            f"[OK] {fold_id} TEST {test_start.date()}->{(test_end - pd.Timedelta(days=1)).date()} | "
             f"ret={metrics['total_return_pct']:.2f}% dd={metrics['max_drawdown_pct']:.2f}% "
             f"sharpe={metrics['daily_sharpe']:.2f} trades={metrics['total_trades']}"
         )
@@ -531,6 +551,8 @@ def main() -> int:
             "leverage": float(args.leverage),
             "mmr": float(args.mmr),
             "funding_per_8h": float(args.funding_per_8h),
+            "adx_period": adx_period,
+            "strategy_rules": serialize_signal_rules(rules),
             "tune_adx_threshold": tune_list,
         },
         "outputs": {

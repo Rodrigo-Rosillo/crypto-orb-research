@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -22,11 +21,6 @@ with open(REPO_ROOT / "config_forward_test.yaml", encoding="utf-8") as f:
 
 symbol = cfg["symbol"]
 timeframe = cfg["timeframe"]
-orb_start = datetime.strptime(cfg["orb"]["start"], "%H:%M").time()
-orb_end = datetime.strptime(cfg["orb"]["end"], "%H:%M").time()
-orb_cutoff = datetime.strptime(cfg["orb"]["cutoff"], "%H:%M").time()
-adx_period = int(cfg["adx"]["period"])
-adx_threshold = float(cfg["adx"]["threshold"])
 initial_capital = float(cfg["risk"]["initial_capital"])
 position_size = float(cfg["risk"]["position_size"])
 taker_fee_rate = float(cfg["fees"]["taker_fee_rate"])
@@ -81,15 +75,7 @@ def replay_results():
     batch_result = run_shadow_futures(
         df_raw=df_slice,
         valid_days=valid_days,
-        orb_start=orb_start,
-        orb_end=orb_end,
-        orb_cutoff=orb_cutoff,
-        adx_period=adx_period,
-        adx_threshold=adx_threshold,
-        initial_capital=initial_capital,
-        position_size=position_size,
-        taker_fee_rate=taker_fee_rate,
-        leverage=leverage,
+        cfg=cfg,
         delay_bars=delay_bars,
         slippage_bps=slippage_bps,
         fee_mult=1.0,
@@ -103,14 +89,10 @@ def replay_results():
         else initial_capital
     )
 
-    df_sig, orb_ranges = build_signals(
+    df_sig, _, _ = build_signals(
         df_raw=df_slice,
         valid_days=valid_days,
-        orb_start=orb_start,
-        orb_end=orb_end,
-        orb_cutoff=orb_cutoff,
-        adx_period=adx_period,
-        adx_threshold=adx_threshold,
+        cfg=cfg,
     )
 
     cfg_obj = FuturesEngineConfig(
@@ -131,17 +113,6 @@ def replay_results():
 
     last_close = None
     for ts, row in df_sig.iterrows():
-        bar_date = ts.date()
-        if bar_date in orb_ranges.index:
-            orb_row = orb_ranges.loc[bar_date]
-            orb_high = (
-                None if pd.isna(orb_row.get("orb_high")) else float(orb_row["orb_high"])
-            )
-            orb_low = None if pd.isna(orb_row.get("orb_low")) else float(orb_row["orb_low"])
-        else:
-            orb_high = None
-            orb_low = None
-
         engine.on_bar(
             ts=ts,
             bar_open=float(row["open"]),
@@ -151,8 +122,8 @@ def replay_results():
             current_date=row.get("date"),
             signal=int(row.get("signal", 0) or 0),
             signal_type=str(row.get("signal_type", "") or ""),
-            orb_high=orb_high,
-            orb_low=orb_low,
+            orb_high=None if pd.isna(row.get("orb_high")) else float(row.get("orb_high")),
+            orb_low=None if pd.isna(row.get("orb_low")) else float(row.get("orb_low")),
             valid_days=valid_days,
         )
         last_close = float(row["close"])

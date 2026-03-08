@@ -13,14 +13,40 @@ timezone:
   data_timezone: "UTC"
   orb_times_timezone: "UTC"
 
-orb:
-  start: "13:30"
-  end: "14:00"
-  cutoff: "14:00"
-
 adx:
   period: 14
-  threshold: 43
+
+signals:
+  rules:
+    - signal_type: uptrend_reversion
+      signal: 1
+      trend: uptrend
+      trigger: close_below_orb_low
+      adx_threshold: 35
+      orb:
+        start: "12:30"
+        end: "13:00"
+        cutoff: "13:00"
+
+    - signal_type: downtrend_reversion
+      signal: -2
+      trend: downtrend
+      trigger: close_above_orb_high
+      adx_threshold: 44
+      orb:
+        start: "13:00"
+        end: "13:30"
+        cutoff: "13:30"
+
+    - signal_type: downtrend_breakdown
+      signal: -1
+      trend: downtrend
+      trigger: close_below_orb_low
+      adx_threshold: 43
+      orb:
+        start: "13:30"
+        end: "14:00"
+        cutoff: "14:00"
 
 risk:
   initial_capital: 100

@@ -24,7 +24,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.utils import parse_hhmm, sha256_file, stable_json  # noqa: E402
-from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges  # noqa: E402
+from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges, load_signal_rules_from_config  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
 from backtester.risk import risk_limits_from_config  # noqa: E402
 
@@ -209,6 +209,12 @@ def main() -> int:
 
     cfg_text = config_path.read_text(encoding="utf-8")
     cfg = yaml.safe_load(cfg_text) or {}
+    rules = load_signal_rules_from_config(cfg)
+    if len(rules) > 1:
+        raise ValueError(
+            "walk_forward_regime_filter currently supports only legacy single-rule configs; "
+            "multi-rule signals.rules configs are not supported."
+        )
 
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
@@ -384,7 +390,7 @@ def main() -> int:
             blocked_rows.append({"fold_id": fold_id, "date_utc": str(d)})
 
         print(
-            f"✅ {fold_id} | blocked={len(blocked_days)} | trades={len(trades_df)} | "
+            f"[OK] {fold_id} | blocked={len(blocked_days)} | trades={len(trades_df)} | "
             f"ret={eq_sum['total_return_pct']:.2f}% | sharpe={sh:.2f}"
         )
 

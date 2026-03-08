@@ -10,7 +10,7 @@ import pandas as pd
 
 def backtest_orb_strategy(
     df: pd.DataFrame,
-    orb_ranges: pd.DataFrame,
+    orb_ranges: Optional[pd.DataFrame] = None,
     initial_capital: float = 10000,
     position_size: float = 0.95,
     taker_fee_rate: float = 0.0005,
@@ -57,6 +57,8 @@ def backtest_orb_strategy(
     pending_signal_type: str = ""
     pending_date = None         # signal day (python date)
     pending_due_i: Optional[int] = None  # bar index when it should execute
+    pending_orb_high: Optional[float] = None
+    pending_orb_low: Optional[float] = None
 
     # Trade state vars
     entry_time = None
@@ -75,15 +77,22 @@ def backtest_orb_strategy(
 
         # 1) Execute pending entry at this bar open (if due)
         if position == 0.0 and pending_signal != 0 and pending_due_i == i:
+            exec_orb_high = pending_orb_high
+            exec_orb_low = pending_orb_low
+            if (exec_orb_high is None or exec_orb_low is None) and orb_ranges is not None and not orb_ranges.empty:
+                if pending_date in orb_ranges.index:
+                    if exec_orb_high is None:
+                        exec_orb_high = float(orb_ranges.loc[pending_date, "orb_high"])
+                    if exec_orb_low is None:
+                        exec_orb_low = float(orb_ranges.loc[pending_date, "orb_low"])
+
             if (
-                pending_date in orb_ranges.index
+                exec_orb_high is not None
+                and exec_orb_low is not None
                 and capital > 0
                 and pending_date in valid_days
                 and current_date in valid_days
             ):
-                orb_high = float(orb_ranges.loc[pending_date, "orb_high"])
-                orb_low = float(orb_ranges.loc[pending_date, "orb_low"])
-
                 notional_value = capital * position_size
                 entry_fee = notional_value * fee_rate
                 total_fees_paid += entry_fee
@@ -102,7 +111,7 @@ def backtest_orb_strategy(
                     # LONG (uptrend_reversion)
                     position = (notional_value - entry_fee) / entry_price
                     capital -= notional_value
-                    target_price = orb_high
+                    target_price = float(exec_orb_high)
                     pct_to_target = (target_price - entry_price) / entry_price
                     stop_loss = entry_price * (1 - pct_to_target)
 
@@ -111,13 +120,13 @@ def backtest_orb_strategy(
                     position = -((notional_value - entry_fee) / entry_price)
                     capital -= notional_value
                     target_price = entry_price * 0.98
-                    stop_loss = orb_high
+                    stop_loss = float(exec_orb_high)
 
                 elif pending_signal == -2:
                     # SHORT (downtrend_reversion)
                     position = -((notional_value - entry_fee) / entry_price)
                     capital -= notional_value
-                    target_price = orb_low
+                    target_price = float(exec_orb_low)
                     pct_to_target = (entry_price - target_price) / entry_price
                     stop_loss = entry_price * (1 + pct_to_target)
 
@@ -126,6 +135,8 @@ def backtest_orb_strategy(
             pending_signal_type = ""
             pending_date = None
             pending_due_i = None
+            pending_orb_high = None
+            pending_orb_low = None
 
         # 2) Manage open position (SL first, then TP). Apply adverse slippage on exit.
         if position != 0.0:
@@ -273,6 +284,14 @@ def backtest_orb_strategy(
                 pending_signal_type = signal_type
                 pending_date = current_date
                 pending_due_i = due
+                if "orb_high" in df.columns and not pd.isna(df["orb_high"].iloc[i]):
+                    pending_orb_high = float(df["orb_high"].iloc[i])
+                else:
+                    pending_orb_high = None
+                if "orb_low" in df.columns and not pd.isna(df["orb_low"].iloc[i]):
+                    pending_orb_low = float(df["orb_low"].iloc[i])
+                else:
+                    pending_orb_low = None
 
         # 4) Mark-to-market equity on bar close (deterministic)
         if position > 0:
