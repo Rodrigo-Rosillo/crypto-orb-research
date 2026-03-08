@@ -34,6 +34,14 @@ def _append_rows(path, rows, columns, name: str) -> None:
     append_csv_rows(path, rows, columns)
 
 
+def _extract_df_sig(build_result: Any) -> pd.DataFrame:
+    if isinstance(build_result, tuple) and len(build_result) >= 1:
+        df_sig = build_result[0]
+        if isinstance(df_sig, pd.DataFrame):
+            return df_sig
+    raise TypeError("build_signals must return a tuple whose first item is a pandas DataFrame")
+
+
 async def run_live_shadow(
     *,
     run_dir,  # Path
@@ -42,6 +50,11 @@ async def run_live_shadow(
     risk_limits: Optional[RiskLimits],
     symbol: str,
     timeframe: str,
+    orb_start=None,
+    orb_end=None,
+    orb_cutoff=None,
+    adx_period: Optional[int] = None,
+    adx_threshold: Optional[float] = None,
     initial_capital: float,
     position_size: float,
     taker_fee_rate: float,
@@ -63,6 +76,7 @@ async def run_live_shadow(
       - runs a stateful shadow engine and writes forward-test artifacts incrementally
       - triggers a kill switch if candles go stale
     """
+    _ = (orb_start, orb_end, orb_cutoff, adx_period, adx_threshold)
 
     live_cfg = ft_cfg.get("live") if isinstance(ft_cfg.get("live"), dict) else {}
     market = str((live_cfg or {}).get("market", "futures"))
@@ -290,10 +304,12 @@ async def run_live_shadow(
 
             # Recompute signals on the current history window (slow but fine for 30m cadence)
             valid_days = set(df_raw.index.date)
-            df_sig, _, _ = build_signals(
-                df_raw=df_raw,
-                valid_days=valid_days,
-                cfg=cfg,
+            df_sig = _extract_df_sig(
+                build_signals(
+                    df_raw=df_raw,
+                    valid_days=valid_days,
+                    cfg=cfg,
+                )
             )
 
             if bar.open_time not in df_sig.index:
