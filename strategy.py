@@ -8,6 +8,8 @@ from typing import Any, Mapping, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from execution_specs import get_execution_spec
+
 ALLOWED_TRENDS = {"uptrend", "downtrend"}
 ALLOWED_TRIGGERS = {"close_below_orb_low", "close_above_orb_high"}
 LEGACY_SIGNAL_TYPE = "downtrend_breakdown"
@@ -97,6 +99,7 @@ def _validate_rule_set(rules: Sequence[SignalRule]) -> None:
 
     for rule in rules:
         _validate_rule(rule)
+        get_execution_spec(rule.signal_type)
 
 
 def _load_rule_from_mapping(raw_rule: Any, index: int) -> SignalRule:

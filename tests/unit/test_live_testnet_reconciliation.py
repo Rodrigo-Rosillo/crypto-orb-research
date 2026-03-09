@@ -143,7 +143,12 @@ def _live_bar(live_open: pd.Timestamp) -> LiveBar:
 def _build_signals_df(df_raw: pd.DataFrame, *, signal: int) -> pd.DataFrame:
     df_sig = df_raw.copy()
     df_sig["signal"] = int(signal)
-    df_sig["signal_type"] = "unit_runtime_signal" if int(signal) != 0 else ""
+    if int(signal) > 0:
+        df_sig["signal_type"] = "uptrend_reversion"
+    elif int(signal) < 0:
+        df_sig["signal_type"] = "downtrend_breakdown"
+    else:
+        df_sig["signal_type"] = ""
     df_sig["orb_high"] = 200.0
     df_sig["close"] = df_sig["close"].astype(float)
     return df_sig

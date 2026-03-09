@@ -50,7 +50,7 @@ def test_futures_execution_core_fee_and_funding_round_trip_long() -> None:
         bar_close=mark_price,
         current_date=trade_day,
         signal=1,
-        signal_type="unit_long",
+        signal_type="uptrend_reversion",
         orb_high=130.0,
         orb_low=90.0,
         valid_days=valid_days,

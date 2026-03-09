@@ -35,6 +35,14 @@ def multi_rule_cfg() -> dict:
                     "adx_threshold": 43,
                     "orb": {"start": "13:30", "end": "14:00", "cutoff": "14:00"},
                 },
+                {
+                    "signal_type": "uptrend_continuation",
+                    "signal": 2,
+                    "trend": "uptrend",
+                    "trigger": "close_above_orb_high",
+                    "adx_threshold": 29,
+                    "orb": {"start": "14:00", "end": "14:30", "cutoff": "14:30"},
+                },
             ]
         },
     }
@@ -119,6 +127,28 @@ def test_downtrend_breakdown_uses_own_orb_and_threshold() -> None:
     assert out.at[ts, "signal_type"] == "downtrend_breakdown"
     assert out.at[ts, "orb_high"] == pytest.approx(106.0)
     assert out.at[ts, "orb_low"] == pytest.approx(96.0)
+    assert int((out["signal"] != 0).sum()) == 1
+
+
+def test_uptrend_continuation_uses_own_orb_and_threshold() -> None:
+    df = make_df(
+        [
+            {"ts": "2024-01-20 12:30", "open": 101, "high": 105, "low": 100, "close": 102, "trend": "uptrend", "adx": 50},
+            {"ts": "2024-01-20 13:00", "open": 102, "high": 104, "low": 101, "close": 103, "trend": "uptrend", "adx": 50},
+            {"ts": "2024-01-20 13:30", "open": 103, "high": 104, "low": 102, "close": 103, "trend": "uptrend", "adx": 50},
+            {"ts": "2024-01-20 14:00", "open": 100, "high": 103, "low": 99, "close": 100, "trend": "uptrend", "adx": 50},
+            {"ts": "2024-01-20 14:30", "open": 101, "high": 104, "low": 101, "close": 103, "trend": "uptrend", "adx": 50},
+            {"ts": "2024-01-20 15:00", "open": 105, "high": 107, "low": 104, "close": 105, "trend": "uptrend", "adx": 29},
+        ]
+    )
+
+    out = run_multi_rule_signals(df)
+    ts = pd.Timestamp("2024-01-20 15:00", tz="UTC")
+
+    assert out.at[ts, "signal"] == 2
+    assert out.at[ts, "signal_type"] == "uptrend_continuation"
+    assert out.at[ts, "orb_high"] == pytest.approx(104.0)
+    assert out.at[ts, "orb_low"] == pytest.approx(99.0)
     assert int((out["signal"] != 0).sum()) == 1
 
 

@@ -34,6 +34,14 @@ def multi_rule_cfg() -> dict:
                     "adx_threshold": 43,
                     "orb": {"start": "13:30", "end": "14:00", "cutoff": "14:00"},
                 },
+                {
+                    "signal_type": "uptrend_continuation",
+                    "signal": 2,
+                    "trend": "uptrend",
+                    "trigger": "close_above_orb_high",
+                    "adx_threshold": 29,
+                    "orb": {"start": "14:00", "end": "14:30", "cutoff": "14:30"},
+                },
             ]
         },
     }
@@ -49,11 +57,13 @@ def legacy_cfg() -> dict:
 def test_valid_multi_rule_config_parses() -> None:
     rules = load_signal_rules_from_config(multi_rule_cfg())
 
-    assert len(rules) == 3
+    assert len(rules) == 4
     assert rules[0].signal_type == "uptrend_reversion"
     assert rules[1].signal == -2
     assert rules[2].adx_threshold == 43
     assert rules[2].orb_cutoff.strftime("%H:%M") == "14:00"
+    assert rules[3].signal_type == "uptrend_continuation"
+    assert rules[3].signal == 2
 
 
 @pytest.mark.parametrize(

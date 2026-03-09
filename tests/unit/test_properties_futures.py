@@ -84,6 +84,7 @@ def test_property_position_size_cap(max_frac: float, bars: tuple[list[float], li
     for i, (bar_open, signal) in enumerate(zip(opens, signals)):
         ts = BASE_TS + pd.Timedelta(minutes=30 * i)
         eq_before = core.equity(mark_price=float(bar_open))
+        signal_type = "" if int(signal) == 0 else ("uptrend_reversion" if int(signal) > 0 else "downtrend_breakdown")
 
         step = core.on_bar(
             ts=ts,
@@ -93,7 +94,7 @@ def test_property_position_size_cap(max_frac: float, bars: tuple[list[float], li
             bar_close=float(bar_open),
             current_date=BASE_DAY,
             signal=int(signal),
-            signal_type="test",
+            signal_type=signal_type,
             orb_high=200.0,
             orb_low=1.0,
             valid_days=valid_days,
@@ -132,6 +133,7 @@ def test_property_accounting_reconciliation(
     for i, (bar_open, signal) in enumerate(zip(opens, signals)):
         ts = BASE_TS + pd.Timedelta(minutes=30 * i)
         mark = float(bar_open)
+        signal_type = "" if int(signal) == 0 else ("uptrend_reversion" if int(signal) > 0 else "downtrend_breakdown")
 
         core.on_bar(
             ts=ts,
@@ -141,7 +143,7 @@ def test_property_accounting_reconciliation(
             bar_close=mark,
             current_date=BASE_DAY,
             signal=int(signal),
-            signal_type="test",
+            signal_type=signal_type,
             orb_high=200.0,
             orb_low=1.0,
             valid_days=valid_days,
@@ -191,6 +193,7 @@ def test_property_no_lookahead_entries(
     for i, (bar_open, signal) in enumerate(zip(opens, signals)):
         ts = BASE_TS + pd.Timedelta(minutes=30 * i)
         mark = float(bar_open)
+        signal_type = "" if int(signal) == 0 else ("uptrend_reversion" if int(signal) > 0 else "downtrend_breakdown")
 
         step = core.on_bar(
             ts=ts,
@@ -200,7 +203,7 @@ def test_property_no_lookahead_entries(
             bar_close=mark,
             current_date=BASE_DAY,
             signal=int(signal),
-            signal_type="test",
+            signal_type=signal_type,
             orb_high=200.0,
             orb_low=1.0,
             valid_days=valid_days,

@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional, Tuple
 import pandas as pd
 
 from backtester.risk import RiskLimits
+from execution_specs import get_execution_spec, required_orb_fields, resolve_execution_plan
 from forward.risk_engine import RiskDecision, check_margin_ratio, check_order_rejects
 from forward.schemas import FILLS_COLUMNS, ORDERS_COLUMNS, POSITIONS_COLUMNS
 from forward.state_store_sqlite import OpenPositionState, RunnerState, SQLiteStateStore
@@ -1514,8 +1515,9 @@ class TraderService:
             return
 
         signal_type = str(row.get("signal_type", "") or "")
-        side = "SELL" if signal < 0 else "BUY"
-        pos_side = "SHORT" if side == "SELL" else "LONG"
+        execution_spec = get_execution_spec(signal_type)
+        side = "BUY" if execution_spec.side == "long" else "SELL"
+        pos_side = "LONG" if execution_spec.side == "long" else "SHORT"
         entry_time_utc = self._entry_time_utc_from_bar(bar_open_time)
 
         if self.risk_limits is not None and bool(self.risk_limits.enabled):
@@ -1780,11 +1782,20 @@ class TraderService:
             bar_time_utc=entry_time_utc,
         )
 
-        orb_high = row.get("orb_high")
-        if orb_high is None or (isinstance(orb_high, float) and pd.isna(orb_high)):
-            self._emit_event_best_effort([{"ts": _utcnow_iso(), "type": "BRACKET_SKIPPED", "reason": "missing_orb_high"}])
+        orb_values: dict[str, float] = {}
+        missing_field = ""
+        for field_name in required_orb_fields(signal_type):
+            raw_value = row.get(field_name)
+            if raw_value is None or pd.isna(raw_value):
+                missing_field = field_name
+                break
+            orb_values[field_name] = float(raw_value)
+
+        if missing_field:
+            missing_reason = f"missing_{missing_field}"
+            self._emit_event_best_effort([{"ts": _utcnow_iso(), "type": "BRACKET_SKIPPED", "reason": missing_reason}])
             flatten_ok, flatten_detail = self._emergency_flatten(
-                reason="missing_orb_high",
+                reason=missing_reason,
                 known_qty=float(entry_qty),
                 known_side=pos_side,
             )
@@ -1803,12 +1814,18 @@ class TraderService:
                 self.skip_cancel_open_orders_on_exit_runtime = True
                 self._trigger_protection_kill_switch(
                     "KILL_SWITCH_UNPROTECTED_POSITION",
-                    f"missing_orb_high:{flatten_detail}",
+                    f"{missing_reason}:{flatten_detail}",
                 )
             return
 
-        sl_price = float(orb_high)
-        tp_price = float(entry_price) * (0.98 if pos_side == "SHORT" else 1.02)
+        execution_plan = resolve_execution_plan(
+            signal_type=signal_type,
+            entry_price=float(entry_price),
+            orb_high=float(orb_values.get("orb_high", 0.0)),
+            orb_low=float(orb_values.get("orb_low", 0.0)),
+        )
+        sl_price = float(execution_plan.stop_loss)
+        tp_price = float(execution_plan.target_price)
         exit_side = "BUY" if pos_side == "SHORT" else "SELL"
         tp_sent_price = float(tp_price)
         sl_sent_price = float(sl_price)

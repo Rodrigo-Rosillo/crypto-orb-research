@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from execution_specs import get_execution_spec, required_orb_fields, resolve_execution_plan
+
 from .risk import RiskLimits, RiskManager
 
 
@@ -349,18 +351,26 @@ class FuturesExecutionCore:
         if self.side is None and self.pending_signal != 0 and self.pending_due_i == i:
             did_enter = False
             reject_reason = ""
+            has_required_orbs = False
 
             if self.risk_mgr is not None and not self.risk_mgr.can_enter(current_date):
                 reject_reason = "risk_halt"
-            elif (
-                (self.pending_date in valid_days)
+            else:
+                required_fields = required_orb_fields(self.pending_signal_type)
+                has_required_orbs = all(
+                    self.pending_orb_high is not None if field_name == "orb_high" else self.pending_orb_low is not None
+                    for field_name in required_fields
+                )
+
+            if (
+                reject_reason == ""
+                and (self.pending_date in valid_days)
                 and (current_date in valid_days)
                 and (self.free_balance > 0)
-                and (self.pending_orb_high is not None)
-                and (self.pending_orb_low is not None)
+                and has_required_orbs
             ):
-                exec_orb_high = float(self.pending_orb_high)
-                exec_orb_low = float(self.pending_orb_low)
+                exec_orb_high = float(self.pending_orb_high) if self.pending_orb_high is not None else 0.0
+                exec_orb_low = float(self.pending_orb_low) if self.pending_orb_low is not None else 0.0
 
                 planned_margin = self.free_balance * float(self.cfg.position_size)
                 margin_used = planned_margin
@@ -387,12 +397,12 @@ class FuturesExecutionCore:
                     self.position_margin = margin_used
                     self.current_initial_margin = margin_used
 
-                    if self.pending_signal == 1:
-                        self.side = "long"
+                    execution_spec = get_execution_spec(self.pending_signal_type)
+                    self.side = execution_spec.side
+                    if execution_spec.side == "long":
                         fill_px = _slip_price(bar_open, "buy", self.slip_frac)
                         order_side = "BUY"
                     else:
-                        self.side = "short"
                         fill_px = _slip_price(bar_open, "sell", self.slip_frac)
                         order_side = "SELL"
 
@@ -409,17 +419,14 @@ class FuturesExecutionCore:
                     if self.risk_mgr is not None:
                         self.risk_mgr.mark_position_entry(i)
 
-                    if self.pending_signal == 1:
-                        self.target_price = exec_orb_high
-                        pct_to_target = (self.target_price - self.entry_price) / self.entry_price
-                        self.stop_loss = self.entry_price * (1 - pct_to_target)
-                    elif self.pending_signal == -1:
-                        self.target_price = self.entry_price * 0.98
-                        self.stop_loss = exec_orb_high
-                    elif self.pending_signal == -2:
-                        self.target_price = exec_orb_low
-                        pct_to_target = (self.entry_price - self.target_price) / self.entry_price
-                        self.stop_loss = self.entry_price * (1 + pct_to_target)
+                    execution_plan = resolve_execution_plan(
+                        signal_type=self.pending_signal_type,
+                        entry_price=self.entry_price,
+                        orb_high=exec_orb_high,
+                        orb_low=exec_orb_low,
+                    )
+                    self.target_price = float(execution_plan.target_price)
+                    self.stop_loss = float(execution_plan.stop_loss)
 
                     did_enter = True
                     step["entered"] = True
@@ -490,7 +497,8 @@ class FuturesExecutionCore:
                 self.pending_orb_high = None if orb_high is None else float(orb_high)
                 self.pending_orb_low = None if orb_low is None else float(orb_low)
                 step["scheduled"] = True
-                step["scheduled_side"] = "LONG" if int(signal) > 0 else "SHORT"
+                execution_spec = get_execution_spec(str(signal_type))
+                step["scheduled_side"] = "LONG" if execution_spec.side == "long" else "SHORT"
                 step["scheduled_reason"] = str(signal_type)
 
 

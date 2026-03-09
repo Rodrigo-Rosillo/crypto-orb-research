@@ -3,9 +3,11 @@ import os
 # Determinism locks (must be set before Python does much work)
 os.environ["PYTHONHASHSEED"] = "0"
 
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+
+from execution_specs import get_execution_spec, required_orb_fields, resolve_execution_plan
 
 
 def backtest_orb_strategy(
@@ -86,9 +88,14 @@ def backtest_orb_strategy(
                     if exec_orb_low is None:
                         exec_orb_low = float(orb_ranges.loc[pending_date, "orb_low"])
 
+            required_fields = required_orb_fields(pending_signal_type)
+            has_required_orbs = all(
+                exec_orb_high is not None if field_name == "orb_high" else exec_orb_low is not None
+                for field_name in required_fields
+            )
+
             if (
-                exec_orb_high is not None
-                and exec_orb_low is not None
+                has_required_orbs
                 and capital > 0
                 and pending_date in valid_days
                 and current_date in valid_days
@@ -97,38 +104,29 @@ def backtest_orb_strategy(
                 entry_fee = notional_value * fee_rate
                 total_fees_paid += entry_fee
 
-                # Entry fill at open + slippage (buy for longs, sell for shorts)
-                if pending_signal == 1:
-                    fill = slip_price(bar_open, "buy")
-                else:
-                    fill = slip_price(bar_open, "sell")
+                execution_spec = get_execution_spec(pending_signal_type)
+                fill = slip_price(bar_open, "buy" if execution_spec.side == "long" else "sell")
 
                 entry_price = float(fill)
                 entry_time = df.index[i]
                 entry_signal_type = pending_signal_type
 
-                if pending_signal == 1:
-                    # LONG (uptrend_reversion)
+                execution_plan = resolve_execution_plan(
+                    signal_type=pending_signal_type,
+                    entry_price=entry_price,
+                    orb_high=float(exec_orb_high if exec_orb_high is not None else 0.0),
+                    orb_low=float(exec_orb_low if exec_orb_low is not None else 0.0),
+                )
+
+                if execution_plan.side == "long":
                     position = (notional_value - entry_fee) / entry_price
                     capital -= notional_value
-                    target_price = float(exec_orb_high)
-                    pct_to_target = (target_price - entry_price) / entry_price
-                    stop_loss = entry_price * (1 - pct_to_target)
-
-                elif pending_signal == -1:
-                    # SHORT (downtrend_breakdown)
+                else:
                     position = -((notional_value - entry_fee) / entry_price)
                     capital -= notional_value
-                    target_price = entry_price * 0.98
-                    stop_loss = float(exec_orb_high)
 
-                elif pending_signal == -2:
-                    # SHORT (downtrend_reversion)
-                    position = -((notional_value - entry_fee) / entry_price)
-                    capital -= notional_value
-                    target_price = float(exec_orb_low)
-                    pct_to_target = (entry_price - target_price) / entry_price
-                    stop_loss = entry_price * (1 + pct_to_target)
+                target_price = float(execution_plan.target_price)
+                stop_loss = float(execution_plan.stop_loss)
 
             # Clear pending either way
             pending_signal = 0

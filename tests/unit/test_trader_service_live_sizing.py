@@ -44,7 +44,7 @@ class LiveSizingFakeBinanceClient(FakeBinanceClient):
 
 
 def _entry_row() -> pd.Series:
-    return pd.Series({"signal": 1, "signal_type": "unit", "close": 100.0, "orb_high": 200.0})
+    return pd.Series({"signal": 1, "signal_type": "uptrend_reversion", "close": 100.0, "orb_high": 200.0})
 
 
 def test_entry_sizing_uses_live_available_balance_capped_by_config(tmp_path: Path) -> None:

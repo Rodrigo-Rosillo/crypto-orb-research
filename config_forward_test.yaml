@@ -48,6 +48,16 @@ signals:
         end: "14:00"
         cutoff: "14:00"
 
+    - signal_type: uptrend_continuation
+      signal: 2
+      trend: uptrend
+      trigger: close_above_orb_high
+      adx_threshold: 29
+      orb:
+        start: "14:00"
+        end: "14:30"
+        cutoff: "14:30"
+
 risk:
   initial_capital: 100
   # For forward tests, keep sizing conservative. This is a *fraction of free balance used as initial margin*.

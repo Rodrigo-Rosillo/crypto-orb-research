@@ -4,12 +4,14 @@ import os
 os.environ["PYTHONHASHSEED"] = "0"
 
 import argparse
+import copy
 import hashlib
 import platform
 import random
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, replace
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -28,10 +30,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.utils import load_valid_days_csv, parse_hhmm, sha256_file, stable_json  # noqa: E402
-from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges, load_signal_rules_from_config  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
 from backtester.risk import risk_limits_from_config  # noqa: E402
+from core.utils import load_valid_days_csv, parse_hhmm, sha256_file, stable_json  # noqa: E402
+from strategy import SignalRule, build_signals_from_config, load_signal_rules_from_config, serialize_signal_rules  # noqa: E402
 
 
 def sha256_bytes(b: bytes) -> str:
@@ -63,6 +65,174 @@ def add_minutes_to_time(t, minutes: int):
     base = datetime(2000, 1, 1, t.hour, t.minute)
     out = base + timedelta(minutes=int(minutes))
     return out.time()
+
+
+@dataclass(frozen=True)
+class RobustnessScenario:
+    scenario_id: str
+    cfg: Dict[str, Any]
+    perturbed_rule_signal_type: str | None
+    perturbed_adx_threshold: float | None
+    perturbed_orb_start: str | None
+    strategy_rules: List[Dict[str, Any]]
+
+
+def _minutes_between(start: time, end: time) -> int:
+    start_dt = datetime(2000, 1, 1, start.hour, start.minute)
+    end_dt = datetime(2000, 1, 1, end.hour, end.minute)
+    return int((end_dt - start_dt).total_seconds() // 60)
+
+
+def _scenario_cfg_with_rules(cfg: Dict[str, Any], strategy_rules: List[Dict[str, Any]]) -> Dict[str, Any]:
+    scenario_cfg = copy.deepcopy(cfg)
+    signals_cfg = dict(scenario_cfg.get("signals") or {})
+    signals_cfg["rules"] = copy.deepcopy(strategy_rules)
+    scenario_cfg["signals"] = signals_cfg
+    return scenario_cfg
+
+
+def _scenario_id_value(value: float) -> str:
+    return f"{value:g}".replace("-", "m").replace(".", "p")
+
+
+def _build_rule_variant(
+    rule: SignalRule,
+    *,
+    adx_threshold: float,
+    orb_start: time,
+    orb_window_min: int,
+    cutoff_offset_min: int,
+) -> SignalRule:
+    orb_end = add_minutes_to_time(orb_start, orb_window_min)
+    orb_cutoff = add_minutes_to_time(orb_end, cutoff_offset_min)
+    return replace(
+        rule,
+        adx_threshold=float(adx_threshold),
+        orb_start=orb_start,
+        orb_end=orb_end,
+        orb_cutoff=orb_cutoff,
+    )
+
+
+def _baseline_scenario(cfg: Dict[str, Any], rules: List[SignalRule]) -> RobustnessScenario:
+    strategy_rules = serialize_signal_rules(rules)
+    return RobustnessScenario(
+        scenario_id="baseline",
+        cfg=_scenario_cfg_with_rules(cfg, strategy_rules),
+        perturbed_rule_signal_type=None,
+        perturbed_adx_threshold=None,
+        perturbed_orb_start=None,
+        strategy_rules=strategy_rules,
+    )
+
+
+def _build_single_rule_grid_scenarios(
+    cfg: Dict[str, Any],
+    rules: List[SignalRule],
+    adx_threshold_grid: List[float],
+    orb_start_grid: List[str],
+    orb_window_min: int,
+    cutoff_offset_min: int,
+) -> List[RobustnessScenario]:
+    base_rule = rules[0]
+    scenarios: List[RobustnessScenario] = [_baseline_scenario(cfg, rules)]
+
+    for orb_start_str in orb_start_grid:
+        orb_start = parse_hhmm(orb_start_str)
+        for thr in adx_threshold_grid:
+            perturbed_rule = _build_rule_variant(
+                base_rule,
+                adx_threshold=float(thr),
+                orb_start=orb_start,
+                orb_window_min=int(orb_window_min),
+                cutoff_offset_min=int(cutoff_offset_min),
+            )
+            if perturbed_rule == base_rule:
+                continue
+
+            strategy_rules = serialize_signal_rules([perturbed_rule])
+            scenario_id = (
+                f"{base_rule.signal_type}_adx{_scenario_id_value(float(thr))}"
+                f"_orb{orb_start.hour:02d}{orb_start.minute:02d}"
+            )
+            scenarios.append(
+                RobustnessScenario(
+                    scenario_id=scenario_id,
+                    cfg=_scenario_cfg_with_rules(cfg, strategy_rules),
+                    perturbed_rule_signal_type=base_rule.signal_type,
+                    perturbed_adx_threshold=float(thr),
+                    perturbed_orb_start=fmt_hhmm(orb_start),
+                    strategy_rules=strategy_rules,
+                )
+            )
+
+    return scenarios
+
+
+def _build_multi_rule_neighborhood_scenarios(
+    cfg: Dict[str, Any],
+    rules: List[SignalRule],
+) -> List[RobustnessScenario]:
+    scenarios: List[RobustnessScenario] = [_baseline_scenario(cfg, rules)]
+
+    for idx, rule in enumerate(rules):
+        orb_window_min = _minutes_between(rule.orb_start, rule.orb_end)
+        cutoff_offset_min = _minutes_between(rule.orb_end, rule.orb_cutoff)
+        adx_values = [float(rule.adx_threshold) + delta for delta in (-1, 0, 1)]
+        orb_starts = [add_minutes_to_time(rule.orb_start, delta) for delta in (-15, 0, 15)]
+
+        for thr in adx_values:
+            for orb_start in orb_starts:
+                if float(thr) == float(rule.adx_threshold) and orb_start == rule.orb_start:
+                    continue
+
+                perturbed_rule = _build_rule_variant(
+                    rule,
+                    adx_threshold=float(thr),
+                    orb_start=orb_start,
+                    orb_window_min=orb_window_min,
+                    cutoff_offset_min=cutoff_offset_min,
+                )
+                scenario_rules = list(rules)
+                scenario_rules[idx] = perturbed_rule
+                strategy_rules = serialize_signal_rules(scenario_rules)
+                scenario_id = (
+                    f"{rule.signal_type}_adx{_scenario_id_value(float(thr))}"
+                    f"_orb{orb_start.hour:02d}{orb_start.minute:02d}"
+                )
+                scenarios.append(
+                    RobustnessScenario(
+                        scenario_id=scenario_id,
+                        cfg=_scenario_cfg_with_rules(cfg, strategy_rules),
+                        perturbed_rule_signal_type=rule.signal_type,
+                        perturbed_adx_threshold=float(thr),
+                        perturbed_orb_start=fmt_hhmm(orb_start),
+                        strategy_rules=strategy_rules,
+                    )
+                )
+
+    return scenarios
+
+
+def build_robustness_scenarios(
+    cfg: Dict[str, Any],
+    rules: List[SignalRule],
+    *,
+    adx_threshold_grid: List[float],
+    orb_start_grid: List[str],
+    orb_window_min: int,
+    cutoff_offset_min: int,
+) -> List[RobustnessScenario]:
+    if len(rules) == 1:
+        return _build_single_rule_grid_scenarios(
+            cfg,
+            rules,
+            adx_threshold_grid=adx_threshold_grid,
+            orb_start_grid=orb_start_grid,
+            orb_window_min=orb_window_min,
+            cutoff_offset_min=cutoff_offset_min,
+        )
+    return _build_multi_rule_neighborhood_scenarios(cfg, rules)
 
 
 def compute_max_drawdown_pct(equity: pd.Series) -> float:
@@ -126,15 +296,6 @@ def maybe_write_equity_plot(equity_df: pd.DataFrame, out_path: Path) -> None:
             plt.close()
     except Exception:
         return
-
-
-
-    plt.figure()
-    plt.plot(equity_df["timestamp"], equity_df["equity"])
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(out_path)
-    plt.close()
 
 
 def summarize_run(
@@ -257,11 +418,6 @@ def main() -> int:
     cfg_text = config_path.read_text(encoding="utf-8")
     cfg = yaml.safe_load(cfg_text) or {}
     rules = load_signal_rules_from_config(cfg)
-    if len(rules) > 1:
-        raise ValueError(
-            "robustness_table currently supports only legacy single-rule configs; "
-            "multi-rule signals.rules configs are not supported."
-        )
 
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
@@ -307,11 +463,18 @@ def main() -> int:
     valid_days = load_valid_days_csv(valid_days_path)
     print(f"[OK] Valid days loaded: {len(valid_days)} ({valid_days_path})")
 
-    # Precompute indicators once
-    df_ind = add_trend_indicators(df, period=adx_period)
-
     adx_threshold_grid = parse_float_list(args.adx_threshold_grid)
     orb_start_grid = parse_time_list(args.orb_start_grid)
+    scenarios = build_robustness_scenarios(
+        cfg,
+        rules,
+        adx_threshold_grid=adx_threshold_grid,
+        orb_start_grid=orb_start_grid,
+        orb_window_min=int(args.orb_window_min),
+        cutoff_offset_min=int(args.cutoff_offset_min),
+    )
+    if args.max_scenarios:
+        scenarios = scenarios[: int(args.max_scenarios)]
 
     # Engine config
     futures_cfg = FuturesEngineConfig(
@@ -329,172 +492,141 @@ def main() -> int:
     # Run scenarios
     rows: List[Dict[str, Any]] = []
     outputs: Dict[str, str] = {}
-    scenario_count = 0
 
-    for orb_start_str in orb_start_grid:
-        orb_start = parse_hhmm(orb_start_str)
-        orb_end = add_minutes_to_time(orb_start, int(args.orb_window_min))
-        orb_cutoff = add_minutes_to_time(orb_end, int(args.cutoff_offset_min))
+    for scenario in scenarios:
+        sid = scenario.scenario_id
+        sdir = scenarios_dir / sid
+        sdir.mkdir(parents=True, exist_ok=True)
 
-        # ORB ranges depend only on orb times
-        orb_ranges = identify_orb_ranges(df_ind, orb_start_time=orb_start, orb_end_time=orb_end)
-        orb_ranges = orb_ranges.loc[orb_ranges.index.isin(valid_days)]
+        df_sig, _, scenario_rules = build_signals_from_config(df, scenario.cfg, valid_days)
 
-        for thr in adx_threshold_grid:
-            scenario_count += 1
-            if args.max_scenarios and scenario_count > int(args.max_scenarios):
-                break
+        signal_counts = df_sig.loc[df_sig["signal"] != 0, "signal_type"].value_counts(dropna=False).to_dict()
+        signals_total = int((df_sig["signal"] != 0).sum())
 
-            sid = f"adx{thr:g}_orb{orb_start.hour:02d}{orb_start.minute:02d}".replace(".", "p")
-            sdir = scenarios_dir / sid
-            sdir.mkdir(parents=True, exist_ok=True)
+        total_fees = 0.0
+        total_funding = 0.0
+        liquidations = 0
+        engine_stats: Dict[str, Any] = {}
 
-            # Signals for this threshold + cutoff
-            df_sig = generate_orb_signals(
-                df_ind,
-                orb_ranges=orb_ranges,
-                adx_threshold=float(thr),
-                orb_cutoff_time=orb_cutoff,
-            )
+        if args.engine == "spot":
+            from backtester.spot_engine import backtest_orb_strategy  # type: ignore
 
-            # Zero out signals on invalid days (keeps candles but blocks entries)
-            invalid_mask = ~df_sig["date"].isin(valid_days)
-            df_sig.loc[invalid_mask, "signal"] = 0
-            df_sig.loc[invalid_mask, "signal_type"] = ""
-
-            # Helpful counts
-            signal_counts = df_sig.loc[df_sig["signal"] != 0, "signal_type"].value_counts(dropna=False).to_dict()
-            signals_total = int((df_sig["signal"] != 0).sum())
-
-            # Run engine
-            total_fees = 0.0
-            total_funding = 0.0
-            liquidations = 0
-            engine_stats: Dict[str, Any] = {}
-
-            if args.engine == "spot":
-                from backtester.spot_engine import backtest_orb_strategy  # type: ignore
-
-                trades, equity_curve, final_capital, total_fees = backtest_orb_strategy(
-                    df=df_sig,
-                    orb_ranges=orb_ranges,
-                    initial_capital=initial_capital,
-                    position_size=position_size,
-                    taker_fee_rate=taker_fee_rate,
-                    valid_days=valid_days,
-                    fee_mult=float(args.fee_mult),
-                    slippage_bps=float(args.slippage_bps),
-                    delay_bars=int(args.delay_bars),
-                )
-                engine_stats = {
-                    "final_capital": float(final_capital),
-                    "total_fees": float(total_fees),
-                    "total_funding": 0.0,
-                    "liquidations": 0,
-                }
-            else:
-                trades, equity_curve, stats = backtest_futures_orb(
-                    df=df_sig,
-                    orb_ranges=orb_ranges,
-                    valid_days=valid_days,
-                    cfg=futures_cfg,
-                    risk_limits=risk_limits,
-                )
-                total_fees = float(stats.get("total_fees", 0.0))
-                total_funding = float(stats.get("total_funding", 0.0))
-                liquidations = int(stats.get("liquidations", 0))
-                engine_stats = stats
-
-            trades_df = pd.DataFrame(trades)
-            equity_df = pd.DataFrame({"timestamp": df_sig.index, "equity": equity_curve})
-
-            metrics = summarize_run(
-                trades_df=trades_df,
-                equity_df=equity_df,
+            trades, equity_curve, final_capital, total_fees = backtest_orb_strategy(
+                df=df_sig,
+                orb_ranges=None,
                 initial_capital=initial_capital,
-                total_fees=total_fees,
-                total_funding=total_funding,
-                liquidations=liquidations,
+                position_size=position_size,
+                taker_fee_rate=taker_fee_rate,
+                valid_days=valid_days,
+                fee_mult=float(args.fee_mult),
+                slippage_bps=float(args.slippage_bps),
+                delay_bars=int(args.delay_bars),
             )
-
-            # Write scenario artifacts
-            trades_path = sdir / "trades.csv"
-            equity_path = sdir / "equity_curve.csv"
-            results_path = sdir / "results.json"
-            plot_path = sdir / "equity_curve.png"
-
-            trades_df.to_csv(trades_path, index=False)
-            equity_df.to_csv(equity_path, index=False)
-            maybe_write_equity_plot(equity_df, plot_path)
-
-            result_obj = {
-                "scenario_id": sid,
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "range": {
-                    "start": equity_df["timestamp"].min().isoformat(),
-                    "end": equity_df["timestamp"].max().isoformat(),
-                    "candles": int(len(equity_df)),
-                },
-                "params": {
-                    "adx_period": int(adx_period),
-                    "adx_threshold": float(thr),
-                    "orb_start": fmt_hhmm(orb_start),
-                    "orb_end": fmt_hhmm(orb_end),
-                    "orb_cutoff": fmt_hhmm(orb_cutoff),
-                    "orb_window_min": int(args.orb_window_min),
-                    "cutoff_offset_min": int(args.cutoff_offset_min),
-                    "engine": args.engine,
-                    "initial_capital": float(initial_capital),
-                    "position_size": float(position_size),
-                    "taker_fee_rate": float(taker_fee_rate),
-                    "fee_mult": float(args.fee_mult),
-                    "slippage_bps": float(args.slippage_bps),
-                    "delay_bars": int(args.delay_bars),
-                    "leverage": float(args.leverage),
-                    "mmr": float(args.mmr),
-                    "funding_per_8h": float(args.funding_per_8h),
-                },
-                "signals": {
-                    "signals_total": int(signals_total),
-                    "signal_type_counts": signal_counts,
-                },
-                "engine_stats": engine_stats,
-                "metrics": metrics,
+            engine_stats = {
+                "final_capital": float(final_capital),
+                "total_fees": float(total_fees),
+                "total_funding": 0.0,
+                "liquidations": 0,
             }
-            results_path.write_text(stable_json(result_obj), encoding="utf-8")
+        else:
+            trades, equity_curve, stats = backtest_futures_orb(
+                df=df_sig,
+                orb_ranges=None,
+                valid_days=valid_days,
+                cfg=futures_cfg,
+                risk_limits=risk_limits,
+            )
+            total_fees = float(stats.get("total_fees", 0.0))
+            total_funding = float(stats.get("total_funding", 0.0))
+            liquidations = int(stats.get("liquidations", 0))
+            engine_stats = stats
 
-            # Summary row
-            row = {
-                "scenario_id": sid,
-                "adx_threshold": float(thr),
-                "orb_start": fmt_hhmm(orb_start),
-                "orb_end": fmt_hhmm(orb_end),
-                "orb_cutoff": fmt_hhmm(orb_cutoff),
+        trades_df = pd.DataFrame(trades)
+        equity_df = pd.DataFrame({"timestamp": df_sig.index, "equity": equity_curve})
+        strategy_rules = serialize_signal_rules(scenario_rules)
+
+        metrics = summarize_run(
+            trades_df=trades_df,
+            equity_df=equity_df,
+            initial_capital=initial_capital,
+            total_fees=total_fees,
+            total_funding=total_funding,
+            liquidations=liquidations,
+        )
+
+        trades_path = sdir / "trades.csv"
+        equity_path = sdir / "equity_curve.csv"
+        results_path = sdir / "results.json"
+        plot_path = sdir / "equity_curve.png"
+
+        trades_df.to_csv(trades_path, index=False)
+        equity_df.to_csv(equity_path, index=False)
+        maybe_write_equity_plot(equity_df, plot_path)
+
+        result_obj = {
+            "scenario_id": sid,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "range": {
+                "start": equity_df["timestamp"].min().isoformat(),
+                "end": equity_df["timestamp"].max().isoformat(),
+                "candles": int(len(equity_df)),
+            },
+            "params": {
+                "adx_period": int(adx_period),
+                "engine": args.engine,
+                "initial_capital": float(initial_capital),
+                "position_size": float(position_size),
+                "taker_fee_rate": float(taker_fee_rate),
+                "fee_mult": float(args.fee_mult),
+                "slippage_bps": float(args.slippage_bps),
+                "delay_bars": int(args.delay_bars),
+                "leverage": float(args.leverage),
+                "mmr": float(args.mmr),
+                "funding_per_8h": float(args.funding_per_8h),
+                "perturbed_rule_signal_type": scenario.perturbed_rule_signal_type,
+                "perturbed_adx_threshold": scenario.perturbed_adx_threshold,
+                "perturbed_orb_start": scenario.perturbed_orb_start,
+                "strategy_rules": strategy_rules,
+            },
+            "signals": {
                 "signals_total": int(signals_total),
+                "signal_type_counts": signal_counts,
+            },
+            "engine_stats": engine_stats,
+            "metrics": metrics,
+        }
+        results_path.write_text(stable_json(result_obj), encoding="utf-8")
+
+        rows.append(
+            {
+                "scenario_id": sid,
+                "perturbed_rule_signal_type": scenario.perturbed_rule_signal_type,
+                "perturbed_adx_threshold": scenario.perturbed_adx_threshold,
+                "perturbed_orb_start": scenario.perturbed_orb_start,
+                "signals_total": int(signals_total),
+                "strategy_rules": stable_json(strategy_rules),
                 **metrics,
             }
-            rows.append(row)
+        )
 
-            outputs[f"scenarios/{sid}/results.json"] = str(results_path)
-            outputs[f"scenarios/{sid}/trades.csv"] = str(trades_path)
-            outputs[f"scenarios/{sid}/equity_curve.csv"] = str(equity_path)
-            if plot_path.exists():
-                outputs[f"scenarios/{sid}/equity_curve.png"] = str(plot_path)
+        outputs[f"scenarios/{sid}/results.json"] = str(results_path)
+        outputs[f"scenarios/{sid}/trades.csv"] = str(trades_path)
+        outputs[f"scenarios/{sid}/equity_curve.csv"] = str(equity_path)
+        if plot_path.exists():
+            outputs[f"scenarios/{sid}/equity_curve.png"] = str(plot_path)
 
-            print(
-                f"[OK] {sid} | sharpe={metrics['daily_sharpe']:.2f} | ret={metrics['total_return_pct']:.1f}% | dd={metrics['max_drawdown_pct']:.1f}%"
-            )
-
-        if args.max_scenarios and scenario_count >= int(args.max_scenarios):
-            break
+        label = scenario.perturbed_rule_signal_type or "baseline"
+        print(
+            f"[OK] {sid} [{label}] | sharpe={metrics['daily_sharpe']:.2f} | ret={metrics['total_return_pct']:.1f}% | dd={metrics['max_drawdown_pct']:.1f}%"
+        )
 
     # Write robustness table
     table_df = pd.DataFrame(rows)
     if table_df.empty:
         raise RuntimeError("No scenarios ran. Check your grids / filters.")
 
-    table_df = table_df.sort_values(["adx_threshold", "orb_start"]).reset_index(drop=True)
+    table_df = table_df.reset_index(drop=True)
     table_csv = out_dir / "robustness_table.csv"
     table_df.to_csv(table_csv, index=False)
     outputs["robustness_table.csv"] = str(table_csv)
@@ -542,10 +674,13 @@ def main() -> int:
             "script_sha256": sha256_file(Path(__file__).resolve()),
         },
         "grids": {
+            "mode": "legacy_single_rule_grid" if len(rules) == 1 else "multi_rule_one_rule_at_a_time",
             "adx_threshold_grid": adx_threshold_grid,
             "orb_start_grid": orb_start_grid,
             "orb_window_min": int(args.orb_window_min),
             "cutoff_offset_min": int(args.cutoff_offset_min),
+            "multi_rule_adx_offsets": [-1, 0, 1],
+            "multi_rule_orb_start_offsets_min": [-15, 0, 15],
         },
         "assumptions": {
             "engine": args.engine,
