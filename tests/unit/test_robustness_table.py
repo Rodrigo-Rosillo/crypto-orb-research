@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.robustness_table import build_robustness_scenarios
+from scripts.robustness_table import build_robustness_scenarios, multi_rule_orb_start_offsets_for_timeframe
 from strategy import load_signal_rules_from_config, serialize_signal_rules
 
 
@@ -46,6 +46,11 @@ def multi_rule_cfg() -> dict:
     }
 
 
+def test_multi_rule_orb_start_offsets_for_30m_use_bar_aligned_steps() -> None:
+    assert multi_rule_orb_start_offsets_for_timeframe("30m") == [-30, 0, 30]
+    assert multi_rule_orb_start_offsets_for_timeframe("1h") == [-15, 0, 15]
+
+
 def test_multi_rule_robustness_scenarios_perturb_one_rule_at_a_time() -> None:
     cfg = multi_rule_cfg()
     rules = load_signal_rules_from_config(cfg)
@@ -58,12 +63,19 @@ def test_multi_rule_robustness_scenarios_perturb_one_rule_at_a_time() -> None:
         orb_start_grid=["13:30"],
         orb_window_min=30,
         cutoff_offset_min=0,
+        multi_rule_orb_start_offsets_min=multi_rule_orb_start_offsets_for_timeframe("30m"),
     )
 
     assert len(scenarios) == 33
     assert scenarios[0].scenario_id == "baseline"
     assert scenarios[0].perturbed_rule_signal_type is None
     assert scenarios[0].strategy_rules == base_rules
+    scenario_ids = {scenario.scenario_id for scenario in scenarios}
+
+    assert "uptrend_reversion_adx35_orb1200" in scenario_ids
+    assert "uptrend_reversion_adx35_orb1300" in scenario_ids
+    assert "uptrend_reversion_adx35_orb1215" not in scenario_ids
+    assert "uptrend_reversion_adx35_orb1245" not in scenario_ids
 
     for scenario in scenarios[1:]:
         diffs = [

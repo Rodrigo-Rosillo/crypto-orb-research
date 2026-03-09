@@ -95,6 +95,12 @@ def _scenario_id_value(value: float) -> str:
     return f"{value:g}".replace("-", "m").replace(".", "p")
 
 
+def multi_rule_orb_start_offsets_for_timeframe(timeframe: str) -> List[int]:
+    if str(timeframe) == "30m":
+        return [-30, 0, 30]
+    return [-15, 0, 15]
+
+
 def _build_rule_variant(
     rule: SignalRule,
     *,
@@ -172,6 +178,7 @@ def _build_single_rule_grid_scenarios(
 def _build_multi_rule_neighborhood_scenarios(
     cfg: Dict[str, Any],
     rules: List[SignalRule],
+    orb_start_offsets_min: List[int],
 ) -> List[RobustnessScenario]:
     scenarios: List[RobustnessScenario] = [_baseline_scenario(cfg, rules)]
 
@@ -179,7 +186,9 @@ def _build_multi_rule_neighborhood_scenarios(
         orb_window_min = _minutes_between(rule.orb_start, rule.orb_end)
         cutoff_offset_min = _minutes_between(rule.orb_end, rule.orb_cutoff)
         adx_values = [float(rule.adx_threshold) + delta for delta in (-1, 0, 1)]
-        orb_starts = [add_minutes_to_time(rule.orb_start, delta) for delta in (-15, 0, 15)]
+        # Multi-rule ORB perturbations should stay on the bar grid. On 30m data, +/-15 minutes
+        # would create off-grid starts, so callers can provide +/-30-minute offsets instead.
+        orb_starts = [add_minutes_to_time(rule.orb_start, delta) for delta in orb_start_offsets_min]
 
         for thr in adx_values:
             for orb_start in orb_starts:
@@ -222,6 +231,7 @@ def build_robustness_scenarios(
     orb_start_grid: List[str],
     orb_window_min: int,
     cutoff_offset_min: int,
+    multi_rule_orb_start_offsets_min: List[int],
 ) -> List[RobustnessScenario]:
     if len(rules) == 1:
         return _build_single_rule_grid_scenarios(
@@ -232,7 +242,11 @@ def build_robustness_scenarios(
             orb_window_min=orb_window_min,
             cutoff_offset_min=cutoff_offset_min,
         )
-    return _build_multi_rule_neighborhood_scenarios(cfg, rules)
+    return _build_multi_rule_neighborhood_scenarios(
+        cfg,
+        rules,
+        orb_start_offsets_min=multi_rule_orb_start_offsets_min,
+    )
 
 
 def compute_max_drawdown_pct(equity: pd.Series) -> float:
@@ -422,6 +436,7 @@ def main() -> int:
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
     adx_period = int(cfg["adx"]["period"])
+    multi_rule_orb_start_offsets_min = multi_rule_orb_start_offsets_for_timeframe(timeframe)
 
     initial_capital = float(cfg["risk"]["initial_capital"])
     position_size = float(cfg["risk"]["position_size"])
@@ -472,6 +487,7 @@ def main() -> int:
         orb_start_grid=orb_start_grid,
         orb_window_min=int(args.orb_window_min),
         cutoff_offset_min=int(args.cutoff_offset_min),
+        multi_rule_orb_start_offsets_min=multi_rule_orb_start_offsets_min,
     )
     if args.max_scenarios:
         scenarios = scenarios[: int(args.max_scenarios)]
@@ -680,7 +696,7 @@ def main() -> int:
             "orb_window_min": int(args.orb_window_min),
             "cutoff_offset_min": int(args.cutoff_offset_min),
             "multi_rule_adx_offsets": [-1, 0, 1],
-            "multi_rule_orb_start_offsets_min": [-15, 0, 15],
+            "multi_rule_orb_start_offsets_min": multi_rule_orb_start_offsets_min,
         },
         "assumptions": {
             "engine": args.engine,
