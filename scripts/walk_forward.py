@@ -4,12 +4,12 @@ import os
 os.environ["PYTHONHASHSEED"] = "0"
 
 import argparse
-import copy
 import hashlib
 import platform
 import random
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -27,7 +27,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.utils import load_valid_days_csv, sha256_file, stable_json  # noqa: E402
-from strategy import build_signals_from_config, load_signal_rules_from_config, serialize_signal_rules
+from strategy import add_trend_indicators, build_signals_from_ruleset, load_signal_rules_from_config, serialize_signal_rules
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb
 from backtester.risk import risk_limits_from_config
 
@@ -215,9 +215,8 @@ def main() -> int:
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
     rules = load_signal_rules_from_config(cfg)
-    multi_rule = len(rules) > 1
     adx_period = int(cfg["adx"]["period"])
-    base_adx_threshold = float(rules[0].adx_threshold) if len(rules) == 1 else None
+    single_rule = rules[0] if len(rules) == 1 else None
 
     initial_capital = float(cfg["risk"]["initial_capital"])
     position_size = float(cfg["risk"]["position_size"])
@@ -246,10 +245,9 @@ def main() -> int:
 
     tune_list: List[float] = []
     if args.tune_adx_threshold.strip():
-        if multi_rule:
+        if len(rules) != 1:
             raise ValueError(
-                "--tune-adx-threshold is only supported for legacy single-rule configs; "
-                "multi-rule signals.rules configs are not supported."
+                "--tune-adx-threshold is only supported when the config resolves to exactly one signal rule."
             )
         tune_list = [float(x.strip()) for x in args.tune_adx_threshold.split(",") if x.strip()]
         tune_list = sorted(set(tune_list))
@@ -276,6 +274,8 @@ def main() -> int:
 
         df_train = df[(df.index >= train_start) & (df.index < train_end)]
         df_test = df[(df.index >= test_start) & (df.index < test_end)]
+        df_train_ind = add_trend_indicators(df_train, period=adx_period)
+        df_test_ind = add_trend_indicators(df_test, period=adx_period)
 
         train_days = set(pd.Series(df_train.index.normalize().date).unique())
         test_days = set(pd.Series(df_test.index.normalize().date).unique())
@@ -283,15 +283,15 @@ def main() -> int:
         valid_train_days = valid_days_all.intersection(train_days)
         valid_test_days = valid_days_all.intersection(test_days)
 
-        chosen_adx = base_adx_threshold
+        chosen_rule = single_rule
         tune_table: List[Dict[str, Any]] = []
 
         if tune_list:
             best_score = -1e18
             for thr in tune_list:
-                cfg_tuned = copy.deepcopy(cfg)
-                cfg_tuned.setdefault("adx", {})["threshold"] = float(thr)
-                train_sig, _, _ = build_signals_from_config(df_train, cfg_tuned, valid_train_days)
+                assert single_rule is not None
+                tuned_rule = replace(single_rule, adx_threshold=float(thr))
+                train_sig, _, _ = build_signals_from_ruleset(df_train_ind, [tuned_rule], valid_train_days)
 
                 if args.engine == "futures":
                     cfg_eng = FuturesEngineConfig(
@@ -343,20 +343,21 @@ def main() -> int:
                 tune_table.append({"adx_threshold": thr, "score_train_total_return_pct": score})
                 if score > best_score:
                     best_score = score
-                    chosen_adx = float(thr)
+                    chosen_rule = tuned_rule
 
             (fold_out / "tuning_train.json").write_text(
-                stable_json({"tune": tune_table, "chosen_adx": chosen_adx}), encoding="utf-8"
+                stable_json(
+                    {
+                        "tune": tune_table,
+                        "chosen_adx": float(chosen_rule.adx_threshold) if chosen_rule is not None else None,
+                    }
+                ),
+                encoding="utf-8",
             )
 
-        cfg_test = copy.deepcopy(cfg)
-        if chosen_adx is not None and len(rules) == 1:
-            cfg_test.setdefault("adx", {})["threshold"] = float(chosen_adx)
-        test_sig, test_rule_orb_ranges_df, test_rules = build_signals_from_config(
-            df_test,
-            cfg_test,
-            valid_test_days,
-        )
+        effective_rules = [chosen_rule] if chosen_rule is not None else rules
+        test_sig, test_rule_orb_ranges_df, test_rules = build_signals_from_ruleset(df_test_ind, effective_rules, valid_test_days)
+        chosen_adx_threshold = float(test_rules[0].adx_threshold) if len(test_rules) == 1 else None
 
         total_fees = 0.0
         total_funding = 0.0
@@ -451,7 +452,7 @@ def main() -> int:
                         "test_start": test_start.isoformat(),
                         "test_end": test_end.isoformat(),
                     },
-                    "chosen_adx_threshold": float(chosen_adx) if chosen_adx is not None else None,
+                    "chosen_adx_threshold": chosen_adx_threshold,
                     "params": result_params,
                     "metrics": metrics,
                     "engine_stats": engine_stats,
@@ -467,7 +468,7 @@ def main() -> int:
                 "train_end": (train_end - pd.Timedelta(seconds=1)).date().isoformat(),
                 "test_start": test_start.date().isoformat(),
                 "test_end": (test_end - pd.Timedelta(seconds=1)).date().isoformat(),
-                "chosen_adx_threshold": float(chosen_adx) if chosen_adx is not None else None,
+                "chosen_adx_threshold": chosen_adx_threshold,
                 **metrics,
                 "fold_dir": str(fold_out),
             }

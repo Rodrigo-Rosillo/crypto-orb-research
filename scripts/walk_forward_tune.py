@@ -9,6 +9,7 @@ import platform
 import random
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone, time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -27,7 +28,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.utils import load_valid_days_csv, parse_hhmm, sha256_file, stable_json  # noqa: E402
-from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges, load_signal_rules_from_config  # noqa: E402
+from strategy import SignalRule, add_trend_indicators, build_signals_from_ruleset, load_signal_rules_from_config  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
 from backtester.risk import risk_limits_from_config  # noqa: E402
 
@@ -60,6 +61,31 @@ def add_minutes_to_time(t: time, minutes: int) -> time:
     base = datetime(2000, 1, 1, t.hour, t.minute, tzinfo=timezone.utc)
     out = base + timedelta(minutes=int(minutes))
     return time(out.hour, out.minute)
+
+
+def single_rule_orb_ranges(rule_orb_ranges_df: pd.DataFrame) -> pd.DataFrame:
+    orb_out = rule_orb_ranges_df.loc[:, ["date", "orb_high", "orb_low"]].copy()
+    orb_out = orb_out.drop_duplicates(subset=["date"]).set_index("date").sort_index()
+    return orb_out
+
+
+def build_rule_variant(
+    base_rule: SignalRule,
+    *,
+    adx_threshold: float,
+    orb_start: time,
+    orb_window_min: int,
+    cutoff_offset_min: int,
+) -> SignalRule:
+    orb_end = add_minutes_to_time(orb_start, int(orb_window_min))
+    orb_cutoff = add_minutes_to_time(orb_end, int(cutoff_offset_min))
+    return replace(
+        base_rule,
+        adx_threshold=float(adx_threshold),
+        orb_start=orb_start,
+        orb_end=orb_end,
+        orb_cutoff=orb_cutoff,
+    )
 
 
 def slice_by_date_inclusive(df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
@@ -171,6 +197,7 @@ def parse_time_list(s: str) -> List[str]:
 def run_backtest_one(
     df_ind_slice: pd.DataFrame,
     valid_days_slice: set,
+    base_rule: SignalRule,
     adx_threshold: float,
     orb_start: time,
     orb_window_min: int,
@@ -189,23 +216,16 @@ def run_backtest_one(
     Returns (trades_df, equity_df, metrics, extra)
     extra includes orb params + signals counts.
     """
-    orb_end = add_minutes_to_time(orb_start, int(orb_window_min))
-    orb_cutoff = add_minutes_to_time(orb_end, int(cutoff_offset_min))
-
-    orb_ranges = identify_orb_ranges(df_ind_slice, orb_start_time=orb_start, orb_end_time=orb_end)
-    orb_ranges = orb_ranges.loc[orb_ranges.index.isin(valid_days_slice)]
-
-    df_sig = generate_orb_signals(
-        df_ind_slice,
-        orb_ranges=orb_ranges,
+    scenario_rule = build_rule_variant(
+        base_rule,
         adx_threshold=float(adx_threshold),
-        orb_cutoff_time=orb_cutoff,
+        orb_start=orb_start,
+        orb_window_min=int(orb_window_min),
+        cutoff_offset_min=int(cutoff_offset_min),
     )
-
-    # enforce valid-day policy: block signals on invalid days (belt + suspenders)
-    invalid_mask = ~df_sig["date"].isin(valid_days_slice)
-    df_sig.loc[invalid_mask, "signal"] = 0
-    df_sig.loc[invalid_mask, "signal_type"] = ""
+    df_sig, rule_orb_ranges_df, scenario_rules = build_signals_from_ruleset(df_ind_slice, [scenario_rule], valid_days_slice)
+    effective_rule = scenario_rules[0]
+    orb_ranges = single_rule_orb_ranges(rule_orb_ranges_df)
 
     signals_total = int((df_sig["signal"] != 0).sum())
     signal_counts = df_sig.loc[df_sig["signal"] != 0, "signal_type"].value_counts(dropna=False).to_dict()
@@ -260,9 +280,9 @@ def run_backtest_one(
     )
 
     extra = {
-        "orb_start": fmt_hhmm(orb_start),
-        "orb_end": fmt_hhmm(orb_end),
-        "orb_cutoff": fmt_hhmm(orb_cutoff),
+        "orb_start": fmt_hhmm(effective_rule.orb_start),
+        "orb_end": fmt_hhmm(effective_rule.orb_end),
+        "orb_cutoff": fmt_hhmm(effective_rule.orb_cutoff),
         "signals_total": signals_total,
         "signal_type_counts": signal_counts,
         "engine_stats": extra_engine,
@@ -354,11 +374,11 @@ def main() -> int:
     cfg_text = config_path.read_text(encoding="utf-8")
     cfg = yaml.safe_load(cfg_text) or {}
     rules = load_signal_rules_from_config(cfg)
-    if len(rules) > 1:
+    if len(rules) != 1:
         raise ValueError(
-            "walk_forward_tune currently supports only legacy single-rule configs; "
-            "multi-rule signals.rules configs are not supported."
+            "walk_forward_tune currently supports configs that resolve to exactly one signal rule."
         )
+    base_rule = rules[0]
 
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
@@ -447,6 +467,7 @@ def main() -> int:
                 _, _, metrics, extra = run_backtest_one(
                     df_ind_slice=df_train,
                     valid_days_slice=valid_train,
+                    base_rule=base_rule,
                     adx_threshold=float(thr),
                     orb_start=orb_start,
                     orb_window_min=int(args.orb_window_min),
@@ -505,6 +526,7 @@ def main() -> int:
             tr_trades_df, tr_equity_df, tr_metrics, tr_extra = run_backtest_one(
                 df_ind_slice=df_train,
                 valid_days_slice=valid_train,
+                base_rule=base_rule,
                 adx_threshold=float(chosen_thr),
                 orb_start=chosen_orb_start,
                 orb_window_min=int(args.orb_window_min),
@@ -530,6 +552,7 @@ def main() -> int:
         te_trades_df, te_equity_df, te_metrics, te_extra = run_backtest_one(
             df_ind_slice=df_test,
             valid_days_slice=valid_test,
+            base_rule=base_rule,
             adx_threshold=float(chosen_thr),
             orb_start=chosen_orb_start,
             orb_window_min=int(args.orb_window_min),

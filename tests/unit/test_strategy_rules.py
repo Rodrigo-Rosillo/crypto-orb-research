@@ -54,6 +54,24 @@ def legacy_cfg() -> dict:
     }
 
 
+def single_rule_signals_cfg() -> dict:
+    return {
+        "adx": {"period": 14},
+        "signals": {
+            "rules": [
+                {
+                    "signal_type": "uptrend_reversion",
+                    "signal": 1,
+                    "trend": "uptrend",
+                    "trigger": "close_below_orb_low",
+                    "adx_threshold": 35,
+                    "orb": {"start": "12:30", "end": "13:00", "cutoff": "13:00"},
+                }
+            ]
+        },
+    }
+
+
 def test_valid_multi_rule_config_parses() -> None:
     rules = load_signal_rules_from_config(multi_rule_cfg())
 
@@ -103,3 +121,29 @@ def test_legacy_fallback_config_parses() -> None:
     assert rules[0].signal_type == "downtrend_breakdown"
     assert rules[0].signal == -1
     assert rules[0].orb_start.strftime("%H:%M") == "13:30"
+
+
+def test_explicit_single_rule_signals_config_parses() -> None:
+    rules = load_signal_rules_from_config(single_rule_signals_cfg())
+
+    assert len(rules) == 1
+    assert rules[0].signal_type == "uptrend_reversion"
+    assert rules[0].signal == 1
+    assert rules[0].trend == "uptrend"
+    assert rules[0].trigger == "close_below_orb_low"
+    assert rules[0].adx_threshold == 35
+    assert rules[0].orb_start.strftime("%H:%M") == "12:30"
+
+
+def test_signals_rules_take_precedence_over_conflicting_legacy_fields() -> None:
+    cfg = single_rule_signals_cfg()
+    cfg["adx"]["threshold"] = 99
+    cfg["orb"] = {"start": "23:00", "end": "23:30", "cutoff": "23:30"}
+
+    rules = load_signal_rules_from_config(cfg)
+
+    assert len(rules) == 1
+    assert rules[0].signal_type == "uptrend_reversion"
+    assert rules[0].adx_threshold == 35
+    assert rules[0].orb_start.strftime("%H:%M") == "12:30"
+    assert rules[0].orb_end.strftime("%H:%M") == "13:00"

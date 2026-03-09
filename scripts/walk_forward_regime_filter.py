@@ -23,8 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.utils import parse_hhmm, sha256_file, stable_json  # noqa: E402
-from strategy import add_trend_indicators, generate_orb_signals, identify_orb_ranges, load_signal_rules_from_config  # noqa: E402
+from core.utils import sha256_file, stable_json  # noqa: E402
+from strategy import add_trend_indicators, build_signals_from_ruleset, load_signal_rules_from_config  # noqa: E402
 from backtester.futures_engine import FuturesEngineConfig, backtest_futures_orb  # noqa: E402
 from backtester.risk import risk_limits_from_config  # noqa: E402
 
@@ -66,6 +66,12 @@ def compute_daily_realized_vol(df_prices: pd.DataFrame) -> pd.Series:
     rv2 = tmp.groupby("date")["logret"].apply(lambda x: float(np.nansum(np.square(x.values))))
     rv = np.sqrt(rv2)
     return rv
+
+
+def single_rule_orb_ranges(rule_orb_ranges_df: pd.DataFrame) -> pd.DataFrame:
+    orb_out = rule_orb_ranges_df.loc[:, ["date", "orb_high", "orb_low"]].copy()
+    orb_out = orb_out.drop_duplicates(subset=["date"]).set_index("date").sort_index()
+    return orb_out
 
 
 def adx_at_time(df_ind: pd.DataFrame, dates: List[datetime.date], t) -> pd.Series:
@@ -210,21 +216,21 @@ def main() -> int:
     cfg_text = config_path.read_text(encoding="utf-8")
     cfg = yaml.safe_load(cfg_text) or {}
     rules = load_signal_rules_from_config(cfg)
-    if len(rules) > 1:
+    if len(rules) != 1:
         raise ValueError(
-            "walk_forward_regime_filter currently supports only legacy single-rule configs; "
-            "multi-rule signals.rules configs are not supported."
+            "walk_forward_regime_filter currently supports configs that resolve to exactly one signal rule."
         )
+    fixed_rule = rules[0]
 
     symbol = str(cfg.get("symbol", "SOLUSDT"))
     timeframe = str(cfg.get("timeframe", "30m"))
 
-    orb_start = parse_hhmm(str(cfg["orb"]["start"]))
-    orb_end = parse_hhmm(str(cfg["orb"]["end"]))
-    orb_cutoff = parse_hhmm(str(cfg["orb"]["cutoff"]))
+    orb_start = fixed_rule.orb_start
+    orb_end = fixed_rule.orb_end
+    orb_cutoff = fixed_rule.orb_cutoff
 
     adx_period = int(cfg["adx"]["period"])
-    adx_threshold = float(cfg["adx"]["threshold"])  # fixed = 43
+    adx_threshold = float(fixed_rule.adx_threshold)
 
     initial_capital = float(cfg["risk"]["initial_capital"])
     position_size = float(cfg["risk"]["position_size"])
@@ -320,20 +326,8 @@ def main() -> int:
             & (df_ind.index < pd.Timestamp(test_end, tz="UTC") + pd.Timedelta(days=1))
         ].copy()
 
-        orb_ranges = identify_orb_ranges(df_test, orb_start_time=orb_start, orb_end_time=orb_end)
-        orb_ranges = orb_ranges.loc[orb_ranges.index.isin(valid_test_days)]
-
-        df_sig = generate_orb_signals(
-            df_test,
-            orb_ranges=orb_ranges,
-            adx_threshold=adx_threshold,
-            orb_cutoff_time=orb_cutoff,
-        )
-
-        # Enforce valid days + blocked days (entries only)
-        invalid_mask = ~df_sig["date"].isin(valid_test_days)
-        df_sig.loc[invalid_mask, "signal"] = 0
-        df_sig.loc[invalid_mask, "signal_type"] = ""
+        df_sig, rule_orb_ranges_df, _ = build_signals_from_ruleset(df_test, [fixed_rule], valid_test_days)
+        orb_ranges = single_rule_orb_ranges(rule_orb_ranges_df)
 
         if blocked_days:
             blk = df_sig["date"].isin(blocked_days)
@@ -422,9 +416,9 @@ def main() -> int:
         "settings": {
             "fixed_params": {
                 "adx_threshold": adx_threshold,
-                "orb_start": cfg["orb"]["start"],
-                "orb_end": cfg["orb"]["end"],
-                "orb_cutoff": cfg["orb"]["cutoff"],
+                "orb_start": orb_start.strftime("%H:%M"),
+                "orb_end": orb_end.strftime("%H:%M"),
+                "orb_cutoff": orb_cutoff.strftime("%H:%M"),
             },
             "engine": {
                 "leverage": float(args.leverage),

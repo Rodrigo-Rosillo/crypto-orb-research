@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
 import pytest
 
-from strategy import build_rule_orb_ranges, generate_signals_from_rules, load_signal_rules_from_config
+from strategy import build_rule_orb_ranges, build_signals_from_ruleset, generate_signals_from_rules, load_signal_rules_from_config
 
 
 def multi_rule_cfg() -> dict:
@@ -52,6 +54,24 @@ def legacy_cfg() -> dict:
     return {
         "adx": {"period": 14, "threshold": 43},
         "orb": {"start": "13:30", "end": "14:00", "cutoff": "14:00"},
+    }
+
+
+def single_rule_signals_cfg() -> dict:
+    return {
+        "adx": {"period": 14},
+        "signals": {
+            "rules": [
+                {
+                    "signal_type": "uptrend_reversion",
+                    "signal": 1,
+                    "trend": "uptrend",
+                    "trigger": "close_below_orb_low",
+                    "adx_threshold": 35,
+                    "orb": {"start": "12:30", "end": "13:00", "cutoff": "13:00"},
+                }
+            ]
+        },
     }
 
 
@@ -260,3 +280,28 @@ def test_legacy_single_rule_fallback_still_works() -> None:
 
     assert out.at[ts, "signal"] == -1
     assert out.at[ts, "signal_type"] == "downtrend_breakdown"
+
+
+def test_build_signals_from_ruleset_supports_explicit_single_rule_variants() -> None:
+    base_rule = replace(load_signal_rules_from_config(single_rule_signals_cfg())[0], adx_threshold=40)
+    tuned_rule = replace(base_rule, adx_threshold=35)
+    df = make_df(
+        [
+            {"ts": "2024-01-21 12:30", "open": 105, "high": 110, "low": 100, "close": 105, "trend": "uptrend", "adx": 50},
+            {"ts": "2024-01-21 13:00", "open": 106, "high": 108, "low": 101, "close": 106, "trend": "uptrend", "adx": 50},
+            {"ts": "2024-01-21 13:30", "open": 99, "high": 100, "low": 98, "close": 99, "trend": "uptrend", "adx": 37},
+        ]
+    )
+    valid_days = {pd.Timestamp("2024-01-21", tz="UTC").date()}
+
+    base_out, _, base_rules = build_signals_from_ruleset(df, [base_rule], valid_days)
+    tuned_out, _, tuned_rules = build_signals_from_ruleset(df, [tuned_rule], valid_days)
+    ts = pd.Timestamp("2024-01-21 13:30", tz="UTC")
+
+    assert base_rules[0].signal_type == tuned_rules[0].signal_type == "uptrend_reversion"
+    assert base_rules[0].signal == tuned_rules[0].signal == 1
+    assert base_rules[0].trend == tuned_rules[0].trend == "uptrend"
+    assert base_rules[0].trigger == tuned_rules[0].trigger == "close_below_orb_low"
+    assert base_out.at[ts, "signal"] == 0
+    assert tuned_out.at[ts, "signal"] == 1
+    assert tuned_out.at[ts, "signal_type"] == "uptrend_reversion"

@@ -456,15 +456,25 @@ def build_signals_from_config(
 
     rules = load_signal_rules_from_config(cfg)
     df_ind = add_trend_indicators(df_raw, period=adx_period)
+    return build_signals_from_ruleset(df_ind, rules, valid_days)
 
-    rule_orb_ranges = build_rule_orb_ranges(df_ind, rules)
+
+def build_signals_from_ruleset(
+    df_ind: pd.DataFrame,
+    rules: Sequence[SignalRule],
+    valid_days: Sequence[Any] | set[Any] | None,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[SignalRule]]:
+    rules_list = list(rules)
+    _validate_rule_set(rules_list)
+
+    rule_orb_ranges = build_rule_orb_ranges(df_ind, rules_list)
     valid_day_set = set(valid_days) if valid_days is not None else None
     if valid_day_set is not None:
         for signal_type, orb_df in list(rule_orb_ranges.items()):
             rule_orb_ranges[signal_type] = orb_df.loc[orb_df.index.isin(valid_day_set)]
 
-    rule_orb_ranges_df = flatten_rule_orb_ranges(rule_orb_ranges, rules)
-    df_sig = generate_signals_from_rules(df_ind, rules, rule_orb_ranges)
+    rule_orb_ranges_df = flatten_rule_orb_ranges(rule_orb_ranges, rules_list)
+    df_sig = generate_signals_from_rules(df_ind, rules_list, rule_orb_ranges)
 
     if valid_day_set is not None:
         invalid_mask = ~df_sig["date"].isin(valid_day_set)
@@ -473,7 +483,7 @@ def build_signals_from_config(
         df_sig.loc[invalid_mask, "orb_high"] = np.nan
         df_sig.loc[invalid_mask, "orb_low"] = np.nan
 
-    return df_sig, rule_orb_ranges_df, rules
+    return df_sig, rule_orb_ranges_df, rules_list
 
 
 def generate_orb_signals(
