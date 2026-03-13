@@ -276,14 +276,6 @@ def scenario_id(stage: str, params_by_code: Mapping[str, RuleParameter], order_c
 
 
 def default_stage_settings() -> dict[str, StageExecutionSettings]:
-    robustness_defaults = {
-        "adx_threshold_grid": (35.0, 38.0, 43.0, 48.0, 55.0),
-        "orb_start_grid": ("13:00", "13:30", "14:00"),
-        "orb_window_min": 30,
-        "cutoff_offset_min": 0,
-        "objective": "daily_sharpe",
-        "max_scenarios": 0,
-    }
     return {
         STAGE_BASELINE: StageExecutionSettings(stage=STAGE_BASELINE, evaluation_type=EVAL_WALK_FORWARD),
         STAGE_FRAGILITY: StageExecutionSettings(
@@ -292,7 +284,12 @@ def default_stage_settings() -> dict[str, StageExecutionSettings]:
             train_months=None,
             test_months=None,
             step_months=None,
-            **robustness_defaults,
+            adx_threshold_grid=(35.0, 38.0, 43.0, 48.0, 55.0),
+            orb_start_grid=("13:00", "13:30", "14:00"),
+            orb_window_min=30,
+            cutoff_offset_min=0,
+            objective="daily_sharpe",
+            max_scenarios=0,
         ),
         STAGE_STAGE1_MARGINAL: StageExecutionSettings(stage=STAGE_STAGE1_MARGINAL, evaluation_type=EVAL_WALK_FORWARD),
         STAGE_STAGE1_ISOLATED: StageExecutionSettings(stage=STAGE_STAGE1_ISOLATED, evaluation_type=EVAL_WALK_FORWARD),
@@ -304,7 +301,12 @@ def default_stage_settings() -> dict[str, StageExecutionSettings]:
             train_months=None,
             test_months=None,
             step_months=None,
-            **robustness_defaults,
+            adx_threshold_grid=(35.0, 38.0, 43.0, 48.0, 55.0),
+            orb_start_grid=("13:00", "13:30", "14:00"),
+            orb_window_min=30,
+            cutoff_offset_min=0,
+            objective="daily_sharpe",
+            max_scenarios=0,
         ),
         STAGE_STAGE5_ORDER: StageExecutionSettings(stage=STAGE_STAGE5_ORDER, evaluation_type=EVAL_WALK_FORWARD),
         STAGE_HOLDOUT: StageExecutionSettings(
@@ -1091,4 +1093,4 @@ def write_stage_leaderboard_outputs(run_root: Path, stage: str, leaderboard: pd.
             else:
                 status_by_run_id[str(row["run_id"])] = STATUS_DONE
     update_manifest_statuses(run_root, stage, status_by_run_id)
-    return PromotionOutput(stage=stage, selected_run_ids=tuple(summary["selected_run_ids"]))
+    return PromotionOutput(stage=stage, selected_run_ids=tuple(selected_run_id_list))
