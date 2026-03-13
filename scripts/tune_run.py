@@ -15,7 +15,6 @@ from core.tuning import (  # noqa: E402
     EVAL_WALK_FORWARD,
     STATUS_DONE,
     STATUS_FAILED,
-    STATUS_PENDING,
     STATUS_REJECTED,
     STATUS_RUNNING,
     STATUS_SELECTED,
