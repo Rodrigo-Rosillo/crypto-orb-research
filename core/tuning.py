@@ -1062,15 +1062,16 @@ def write_stage_leaderboard_outputs(run_root: Path, stage: str, leaderboard: pd.
     selected = selected_rows_for_stage(leaderboard, stage)
     selected.to_csv(stage_selected_path(run_root, stage), index=False)
 
+    selected_run_id_list: list[str] = [str(x) for x in selected["run_id"].tolist()] if not selected.empty else []
     summary = {
         "stage": stage,
         "rows": int(len(leaderboard)),
         "selected_rows": int(len(selected)),
-        "selected_run_ids": [str(x) for x in selected["run_id"].tolist()] if not selected.empty else [],
+        "selected_run_ids": selected_run_id_list,
     }
     stage_summary_path(run_root, stage).write_text(stable_json(summary, indent=2), encoding="utf-8")
 
-    selected_run_ids = set(summary["selected_run_ids"])
+    selected_run_ids = set(selected_run_id_list)
     status_by_run_id: dict[str, str] = {}
     if stage == STAGE_STAGE1_ISOLATED:
         for run_id in leaderboard["run_id"].tolist():
