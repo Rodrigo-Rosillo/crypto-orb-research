@@ -344,6 +344,66 @@ Outcome:
 - `reports/walk_forward_tune/folds/` (per-fold artifacts)
 - `reports/walk_forward_tune/run_metadata.json`
 
+> Note: `scripts/walk_forward_tune.py` remains the legacy single-rule tuner. It does **not** generate the staged multi-rule workflow below.
+
+---
+
+### 12b) Multi-rule tuning workflow (4-rule manifest pipeline)
+Use when: you want a reproducible staged search across the four registered rules, with concrete YAML snapshots, per-stage manifests, resumable execution, and deterministic leaderboard promotion.
+
+Initialize a run root from the current four-rule baseline config:
+```bash
+python scripts/tune_manifest.py init --run-root reports/tuning_20260310 --config config.yaml
+```
+
+Generate later-stage manifests after the previous stage leaderboard exists:
+```bash
+python scripts/tune_manifest.py stage1 --run-root reports/tuning_20260310
+python scripts/tune_manifest.py stage2 --run-root reports/tuning_20260310
+python scripts/tune_manifest.py stage3 --run-root reports/tuning_20260310
+python scripts/tune_manifest.py stage4 --run-root reports/tuning_20260310
+python scripts/tune_manifest.py stage5 --run-root reports/tuning_20260310
+python scripts/tune_manifest.py holdout --run-root reports/tuning_20260310
+```
+
+Run any generated stage manifest serially and resumably:
+```bash
+python scripts/tune_run.py --run-root reports/tuning_20260310 --stage stage1_marginal
+python scripts/tune_run.py --run-root reports/tuning_20260310 --stage stage4_joint_fragility
+```
+
+Aggregate completed runs into leaderboard artifacts:
+```bash
+python scripts/tune_leaderboard.py --run-root reports/tuning_20260310 --stage stage1_marginal
+python scripts/tune_leaderboard.py --run-root reports/tuning_20260310 --stage stage4_joint_fragility
+```
+
+Workflow stages:
+- `baseline` â€” fixed development walk-forward on the baseline 4-rule config.
+- `fragility` â€” local baseline robustness neighborhood using `robustness_table.py`.
+- `stage1_marginal` â€” coarse one-rule-at-a-time sweep scored on the full 4-rule strategy.
+- `stage1_isolated` â€” coarse single-rule diagnostic sweep; diagnostic only, no promotion.
+- `stage2_marginal` â€” fine one-rule-at-a-time sweep around the best Stage 1 passing candidate per rule.
+- `stage3_joint` â€” Cartesian recombination of the top 3 Stage 2 candidates per rule.
+- `stage4_joint_fragility` â€” local robustness check for the top 5 Stage 3 joint configs.
+- `stage5_order` â€” all 24 rule-order permutations for the top fragility-passing joint configs.
+- `holdout` â€” fixed untouched holdout evaluation for the top 3 ordered finalists.
+
+Run-root layout:
+- `run_settings.json`
+- `scenario_manifest.csv`
+- `<stage>/manifest.csv`
+- `<stage>/configs/<run_id>.yaml`
+- `<stage>/runs/<run_id>/...`
+- `<stage>/leaderboard.csv`
+- `<stage>/summary.json`
+- `<stage>/selected.csv`
+
+Selection rules:
+- Walk-forward stages rank by `hard_pass`, `median_test_daily_sharpe`, `positive_folds`, `median_test_total_return_pct`, `worst_fold_max_drawdown_pct`, `std_test_total_return_pct`, `total_test_trades`, `distance_from_baseline`, then `scenario_id`.
+- Fragility stages require `neighbor_median_sharpe_ratio >= 0.85`, `neighbor_positive_share >= 0.60`, and `neighbor_dd_buffer >= -5`.
+- The workflow is intentionally scoped to the registered `SOLUSDT 30m` four-rule baseline in canonical order metadata: `uptrend_reversion`, `downtrend_reversion`, `downtrend_breakdown`, `uptrend_continuation`.
+
 ---
 
 ### 13) Regime analysis on baseline trades
@@ -387,6 +447,7 @@ Outcome:
 - Benchmarks: `reports/benchmarks/`
 - Walk-forward: `reports/walk_forward/`
 - Walk-forward tuning: `reports/walk_forward_tune/`
+- Multi-rule tuning: user-chosen run root, e.g. `reports/tuning_20260310/`
 - Walk-forward sweep: `reports/walk_forward_sweep/`
 - Regime analysis: `reports/regime/`
 - Walk-forward regime filter: `reports/walk_forward_regime_filter/`

@@ -13,7 +13,7 @@ import sys
 from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 import numpy as np
 import pandas as pd
@@ -371,7 +371,40 @@ def parse_time_list(s: str) -> List[str]:
     return [x.strip() for x in s.split(",") if x.strip()]
 
 
-def main() -> int:
+@dataclass(frozen=True)
+class RobustnessRunConfig:
+    config: str | Path = "config.yaml"
+    data: str | Path = ""
+    valid_days: str | Path = "data/processed/valid_days.csv"
+    out_dir: str | Path = "reports/robustness"
+    adx_threshold_grid: Sequence[float] = (35.0, 38.0, 43.0, 48.0, 55.0)
+    orb_start_grid: Sequence[str] = ("13:00", "13:30", "14:00")
+    orb_window_min: int = 30
+    cutoff_offset_min: int = 0
+    engine: str = "futures"
+    fee_mult: float = 1.0
+    slippage_bps: float = 0.0
+    delay_bars: int = 1
+    leverage: float = 1.0
+    mmr: float = 0.005
+    funding_per_8h: float = 0.0001
+    start: str = ""
+    end: str = ""
+    objective: str = "daily_sharpe"
+    max_scenarios: int = 0
+
+
+@dataclass(frozen=True)
+class RobustnessRunResult:
+    out_dir: Path
+    table_csv: Path
+    summary_json: Path
+    metadata_json: Path
+    scenario_count: int
+    objective: str
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="Phase 3: robustness table over a small parameter neighborhood (guards against overfitting)."
     )
@@ -409,18 +442,44 @@ def main() -> int:
     # Reporting
     ap.add_argument("--objective", choices=["daily_sharpe", "total_return_pct", "cagr"], default="daily_sharpe")
     ap.add_argument("--max-scenarios", type=int, default=0, help="0 = run all")
+    return ap
 
-    args = ap.parse_args()
 
-    config_path = Path(args.config)
+def parse_run_config(argv: Sequence[str] | None = None) -> RobustnessRunConfig:
+    args = build_arg_parser().parse_args(argv)
+    return RobustnessRunConfig(
+        config=args.config,
+        data=args.data,
+        valid_days=args.valid_days,
+        out_dir=args.out_dir,
+        adx_threshold_grid=tuple(parse_float_list(args.adx_threshold_grid)),
+        orb_start_grid=tuple(parse_time_list(args.orb_start_grid)),
+        orb_window_min=int(args.orb_window_min),
+        cutoff_offset_min=int(args.cutoff_offset_min),
+        engine=args.engine,
+        fee_mult=float(args.fee_mult),
+        slippage_bps=float(args.slippage_bps),
+        delay_bars=int(args.delay_bars),
+        leverage=float(args.leverage),
+        mmr=float(args.mmr),
+        funding_per_8h=float(args.funding_per_8h),
+        start=str(args.start),
+        end=str(args.end),
+        objective=str(args.objective),
+        max_scenarios=int(args.max_scenarios),
+    )
+
+
+def run_robustness_table(run_cfg: RobustnessRunConfig) -> RobustnessRunResult:
+    config_path = Path(run_cfg.config)
     if not config_path.is_absolute():
         config_path = (REPO_ROOT / config_path).resolve()
 
-    valid_days_path = Path(args.valid_days)
+    valid_days_path = Path(run_cfg.valid_days)
     if not valid_days_path.is_absolute():
         valid_days_path = (REPO_ROOT / valid_days_path).resolve()
 
-    out_dir = Path(args.out_dir)
+    out_dir = Path(run_cfg.out_dir)
     if not out_dir.is_absolute():
         out_dir = (REPO_ROOT / out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -446,7 +505,7 @@ def main() -> int:
     risk_limits = risk_limits_from_config(cfg)
 
     # Load parquet
-    data_path = Path(args.data) if args.data else Path(f"data/processed/{symbol}_{timeframe}.parquet")
+    data_path = Path(run_cfg.data) if str(run_cfg.data).strip() else Path(f"data/processed/{symbol}_{timeframe}.parquet")
     if not data_path.is_absolute():
         data_path = (REPO_ROOT / data_path).resolve()
     if not data_path.exists():
@@ -464,11 +523,11 @@ def main() -> int:
             raise ValueError(f"Missing required column in parquet: {c}")
     df = df[needed].copy().sort_index()
 
-    if args.start:
-        start_ts = pd.to_datetime(args.start, utc=True)
+    if run_cfg.start:
+        start_ts = pd.to_datetime(run_cfg.start, utc=True)
         df = df[df.index >= start_ts]
-    if args.end:
-        end_ts = pd.to_datetime(args.end, utc=True)
+    if run_cfg.end:
+        end_ts = pd.to_datetime(run_cfg.end, utc=True)
         df = df[df.index < end_ts]
 
     if df.empty:
@@ -478,31 +537,31 @@ def main() -> int:
     valid_days = load_valid_days_csv(valid_days_path)
     print(f"[OK] Valid days loaded: {len(valid_days)} ({valid_days_path})")
 
-    adx_threshold_grid = parse_float_list(args.adx_threshold_grid)
-    orb_start_grid = parse_time_list(args.orb_start_grid)
+    adx_threshold_grid = [float(x) for x in run_cfg.adx_threshold_grid]
+    orb_start_grid = [str(x) for x in run_cfg.orb_start_grid]
     scenarios = build_robustness_scenarios(
         cfg,
         rules,
         adx_threshold_grid=adx_threshold_grid,
         orb_start_grid=orb_start_grid,
-        orb_window_min=int(args.orb_window_min),
-        cutoff_offset_min=int(args.cutoff_offset_min),
+        orb_window_min=int(run_cfg.orb_window_min),
+        cutoff_offset_min=int(run_cfg.cutoff_offset_min),
         multi_rule_orb_start_offsets_min=multi_rule_orb_start_offsets_min,
     )
-    if args.max_scenarios:
-        scenarios = scenarios[: int(args.max_scenarios)]
+    if run_cfg.max_scenarios:
+        scenarios = scenarios[: int(run_cfg.max_scenarios)]
 
     # Engine config
     futures_cfg = FuturesEngineConfig(
         initial_capital=initial_capital,
         position_size=position_size,
-        leverage=float(args.leverage),
+        leverage=float(run_cfg.leverage),
         taker_fee_rate=taker_fee_rate,
-        fee_mult=float(args.fee_mult),
-        slippage_bps=float(args.slippage_bps),
-        delay_bars=int(args.delay_bars),
-        maintenance_margin_rate=float(args.mmr),
-        funding_rate_per_8h=float(args.funding_per_8h),
+        fee_mult=float(run_cfg.fee_mult),
+        slippage_bps=float(run_cfg.slippage_bps),
+        delay_bars=int(run_cfg.delay_bars),
+        maintenance_margin_rate=float(run_cfg.mmr),
+        funding_rate_per_8h=float(run_cfg.funding_per_8h),
     )
 
     # Run scenarios
@@ -524,7 +583,7 @@ def main() -> int:
         liquidations = 0
         engine_stats: Dict[str, Any] = {}
 
-        if args.engine == "spot":
+        if run_cfg.engine == "spot":
             from backtester.spot_engine import backtest_orb_strategy  # type: ignore
 
             trades, equity_curve, final_capital, total_fees = backtest_orb_strategy(
@@ -534,9 +593,9 @@ def main() -> int:
                 position_size=position_size,
                 taker_fee_rate=taker_fee_rate,
                 valid_days=valid_days,
-                fee_mult=float(args.fee_mult),
-                slippage_bps=float(args.slippage_bps),
-                delay_bars=int(args.delay_bars),
+                fee_mult=float(run_cfg.fee_mult),
+                slippage_bps=float(run_cfg.slippage_bps),
+                delay_bars=int(run_cfg.delay_bars),
             )
             engine_stats = {
                 "final_capital": float(final_capital),
@@ -590,16 +649,16 @@ def main() -> int:
             },
             "params": {
                 "adx_period": int(adx_period),
-                "engine": args.engine,
+                "engine": run_cfg.engine,
                 "initial_capital": float(initial_capital),
                 "position_size": float(position_size),
                 "taker_fee_rate": float(taker_fee_rate),
-                "fee_mult": float(args.fee_mult),
-                "slippage_bps": float(args.slippage_bps),
-                "delay_bars": int(args.delay_bars),
-                "leverage": float(args.leverage),
-                "mmr": float(args.mmr),
-                "funding_per_8h": float(args.funding_per_8h),
+                "fee_mult": float(run_cfg.fee_mult),
+                "slippage_bps": float(run_cfg.slippage_bps),
+                "delay_bars": int(run_cfg.delay_bars),
+                "leverage": float(run_cfg.leverage),
+                "mmr": float(run_cfg.mmr),
+                "funding_per_8h": float(run_cfg.funding_per_8h),
                 "perturbed_rule_signal_type": scenario.perturbed_rule_signal_type,
                 "perturbed_adx_threshold": scenario.perturbed_adx_threshold,
                 "perturbed_orb_start": scenario.perturbed_orb_start,
@@ -648,7 +707,7 @@ def main() -> int:
     outputs["robustness_table.csv"] = str(table_csv)
 
     # Summary (best/median/worst for the chosen objective)
-    obj = str(args.objective)
+    obj = str(run_cfg.objective)
     if obj not in table_df.columns:
         raise ValueError(f"Objective '{obj}' not in table columns")
 
@@ -693,19 +752,19 @@ def main() -> int:
             "mode": "legacy_single_rule_grid" if len(rules) == 1 else "multi_rule_one_rule_at_a_time",
             "adx_threshold_grid": adx_threshold_grid,
             "orb_start_grid": orb_start_grid,
-            "orb_window_min": int(args.orb_window_min),
-            "cutoff_offset_min": int(args.cutoff_offset_min),
+            "orb_window_min": int(run_cfg.orb_window_min),
+            "cutoff_offset_min": int(run_cfg.cutoff_offset_min),
             "multi_rule_adx_offsets": [-1, 0, 1],
             "multi_rule_orb_start_offsets_min": multi_rule_orb_start_offsets_min,
         },
         "assumptions": {
-            "engine": args.engine,
-            "fee_mult": float(args.fee_mult),
-            "slippage_bps": float(args.slippage_bps),
-            "delay_bars": int(args.delay_bars),
-            "leverage": float(args.leverage),
-            "mmr": float(args.mmr),
-            "funding_per_8h": float(args.funding_per_8h),
+            "engine": run_cfg.engine,
+            "fee_mult": float(run_cfg.fee_mult),
+            "slippage_bps": float(run_cfg.slippage_bps),
+            "delay_bars": int(run_cfg.delay_bars),
+            "leverage": float(run_cfg.leverage),
+            "mmr": float(run_cfg.mmr),
+            "funding_per_8h": float(run_cfg.funding_per_8h),
         },
         "outputs": outputs,
         "output_sha256": hashes,
@@ -716,6 +775,18 @@ def main() -> int:
 
     print(f"\n[OK] Wrote: {table_csv}")
     print(f"[OK] Wrote: {summary_path}")
+    return RobustnessRunResult(
+        out_dir=out_dir,
+        table_csv=table_csv,
+        summary_json=summary_path,
+        metadata_json=meta_path,
+        scenario_count=int(len(table_df)),
+        objective=obj,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    run_robustness_table(parse_run_config(argv))
     return 0
 
 

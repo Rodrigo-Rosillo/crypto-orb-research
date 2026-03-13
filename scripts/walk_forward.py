@@ -9,10 +9,10 @@ import platform
 import random
 import subprocess
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 import numpy as np
 import pandas as pd
@@ -166,7 +166,39 @@ def single_rule_orb_ranges(rule_orb_ranges_df: pd.DataFrame) -> pd.DataFrame:
     return orb_out
 
 
-def main() -> int:
+@dataclass(frozen=True)
+class WalkForwardRunConfig:
+    config: str | Path = "config.yaml"
+    data: str | Path = "data/processed/SOLUSDT_30m.parquet"
+    valid_days: str | Path = "data/processed/valid_days.csv"
+    out_dir: str | Path = "reports/walk_forward"
+    engine: str = "futures"
+    train_months: int = 24
+    test_months: int = 6
+    step_months: int = 6
+    start: str = ""
+    end: str = ""
+    fee_mult: float = 1.0
+    slippage_bps: float = 0.0
+    delay_bars: int = 1
+    leverage: float = 1.0
+    mmr: float = 0.005
+    funding_per_8h: float = 0.0001
+    tune_adx_threshold: Sequence[float] = ()
+
+
+@dataclass(frozen=True)
+class WalkForwardRunResult:
+    out_dir: Path
+    folds_csv: Path
+    report_html: Path
+    metadata_json: Path
+    folds_dir: Path
+    folds: int
+    aggregate: Dict[str, Any]
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Phase 3: walk-forward evaluation (rolling train/test windows)")
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--data", default="data/processed/SOLUSDT_30m.parquet", help="Processed parquet dataset")
@@ -198,13 +230,54 @@ def main() -> int:
         default="",
         help="Comma list like '38,43,48'. If provided, chooses best ADX threshold on TRAIN, reports TEST.",
     )
+    return ap
 
-    args = ap.parse_args()
 
-    config_path = (REPO_ROOT / args.config).resolve()
-    data_path = (REPO_ROOT / args.data).resolve()
-    valid_days_path = (REPO_ROOT / args.valid_days).resolve()
-    out_dir = (REPO_ROOT / args.out_dir).resolve()
+def parse_run_config(argv: Sequence[str] | None = None) -> WalkForwardRunConfig:
+    args = build_arg_parser().parse_args(argv)
+
+    tune_list: List[float] = []
+    if args.tune_adx_threshold.strip():
+        tune_list = [float(x.strip()) for x in args.tune_adx_threshold.split(",") if x.strip()]
+        tune_list = sorted(set(tune_list))
+
+    return WalkForwardRunConfig(
+        config=args.config,
+        data=args.data,
+        valid_days=args.valid_days,
+        out_dir=args.out_dir,
+        engine=args.engine,
+        train_months=int(args.train_months),
+        test_months=int(args.test_months),
+        step_months=int(args.step_months),
+        start=str(args.start),
+        end=str(args.end),
+        fee_mult=float(args.fee_mult),
+        slippage_bps=float(args.slippage_bps),
+        delay_bars=int(args.delay_bars),
+        leverage=float(args.leverage),
+        mmr=float(args.mmr),
+        funding_per_8h=float(args.funding_per_8h),
+        tune_adx_threshold=tuple(tune_list),
+    )
+
+
+def run_walk_forward(run_cfg: WalkForwardRunConfig) -> WalkForwardRunResult:
+    config_path = Path(run_cfg.config)
+    if not config_path.is_absolute():
+        config_path = (REPO_ROOT / config_path).resolve()
+
+    data_path = Path(run_cfg.data) if str(run_cfg.data).strip() else Path("")
+    if str(run_cfg.data).strip() and not data_path.is_absolute():
+        data_path = (REPO_ROOT / data_path).resolve()
+
+    valid_days_path = Path(run_cfg.valid_days)
+    if not valid_days_path.is_absolute():
+        valid_days_path = (REPO_ROOT / valid_days_path).resolve()
+
+    out_dir = Path(run_cfg.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = (REPO_ROOT / out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     folds_dir = out_dir / "folds"
     folds_dir.mkdir(parents=True, exist_ok=True)
@@ -217,6 +290,9 @@ def main() -> int:
     rules = load_signal_rules_from_config(cfg)
     adx_period = int(cfg["adx"]["period"])
     single_rule = rules[0] if len(rules) == 1 else None
+
+    if not str(run_cfg.data).strip():
+        data_path = (REPO_ROOT / "data" / "processed" / f"{symbol}_{timeframe}.parquet").resolve()
 
     initial_capital = float(cfg["risk"]["initial_capital"])
     position_size = float(cfg["risk"]["position_size"])
@@ -240,24 +316,22 @@ def main() -> int:
             raise ValueError(f"Missing required column in parquet: {c}")
     df = df[needed_cols].copy().sort_index()
 
-    start_ts = pd.to_datetime(args.start, utc=True) if args.start else df.index.min()
-    end_ts = pd.to_datetime(args.end, utc=True) if args.end else df.index.max()
+    start_ts = pd.to_datetime(run_cfg.start, utc=True) if run_cfg.start else df.index.min()
+    end_ts = pd.to_datetime(run_cfg.end, utc=True) if run_cfg.end else df.index.max()
 
-    tune_list: List[float] = []
-    if args.tune_adx_threshold.strip():
+    tune_list = sorted(set(float(x) for x in run_cfg.tune_adx_threshold))
+    if tune_list:
         if len(rules) != 1:
             raise ValueError(
                 "--tune-adx-threshold is only supported when the config resolves to exactly one signal rule."
             )
-        tune_list = [float(x.strip()) for x in args.tune_adx_threshold.split(",") if x.strip()]
-        tune_list = sorted(set(tune_list))
 
-    folds = generate_folds(start_ts, end_ts, args.train_months, args.test_months, args.step_months)
+    folds = generate_folds(start_ts, end_ts, run_cfg.train_months, run_cfg.test_months, run_cfg.step_months)
     if not folds:
         raise RuntimeError("No folds generated. Try smaller train/test months or adjust --start/--end.")
 
     spot_engine = None
-    if args.engine == "spot":
+    if run_cfg.engine == "spot":
         from backtester.spot_engine import backtest_orb_strategy  # type: ignore
 
         spot_engine = backtest_orb_strategy
@@ -293,17 +367,17 @@ def main() -> int:
                 tuned_rule = replace(single_rule, adx_threshold=float(thr))
                 train_sig, _, _ = build_signals_from_ruleset(df_train_ind, [tuned_rule], valid_train_days)
 
-                if args.engine == "futures":
+                if run_cfg.engine == "futures":
                     cfg_eng = FuturesEngineConfig(
                         initial_capital=initial_capital,
                         position_size=position_size,
-                        leverage=float(args.leverage),
+                        leverage=float(run_cfg.leverage),
                         taker_fee_rate=taker_fee_rate,
-                        fee_mult=float(args.fee_mult),
-                        slippage_bps=float(args.slippage_bps),
-                        delay_bars=int(args.delay_bars),
-                        maintenance_margin_rate=float(args.mmr),
-                        funding_rate_per_8h=float(args.funding_per_8h),
+                        fee_mult=float(run_cfg.fee_mult),
+                        slippage_bps=float(run_cfg.slippage_bps),
+                        delay_bars=int(run_cfg.delay_bars),
+                        maintenance_margin_rate=float(run_cfg.mmr),
+                        funding_rate_per_8h=float(run_cfg.funding_per_8h),
                     )
                     trades, equity_curve, stats = backtest_futures_orb(
                         df=train_sig,
@@ -331,9 +405,9 @@ def main() -> int:
                         position_size=position_size,
                         taker_fee_rate=taker_fee_rate,
                         valid_days=valid_train_days,
-                        fee_mult=float(args.fee_mult),
-                        slippage_bps=float(args.slippage_bps),
-                        delay_bars=int(args.delay_bars),
+                        fee_mult=float(run_cfg.fee_mult),
+                        slippage_bps=float(run_cfg.slippage_bps),
+                        delay_bars=int(run_cfg.delay_bars),
                     )
                     trades_df = pd.DataFrame(trades)
                     equity_df = pd.DataFrame({"timestamp": train_sig.index, "equity": equity_curve})
@@ -364,17 +438,17 @@ def main() -> int:
         liquidations = 0
         engine_stats: Dict[str, Any] = {}
 
-        if args.engine == "futures":
+        if run_cfg.engine == "futures":
             cfg_eng = FuturesEngineConfig(
                 initial_capital=initial_capital,
                 position_size=position_size,
-                leverage=float(args.leverage),
+                leverage=float(run_cfg.leverage),
                 taker_fee_rate=taker_fee_rate,
-                fee_mult=float(args.fee_mult),
-                slippage_bps=float(args.slippage_bps),
-                delay_bars=int(args.delay_bars),
-                maintenance_margin_rate=float(args.mmr),
-                funding_rate_per_8h=float(args.funding_per_8h),
+                fee_mult=float(run_cfg.fee_mult),
+                slippage_bps=float(run_cfg.slippage_bps),
+                delay_bars=int(run_cfg.delay_bars),
+                maintenance_margin_rate=float(run_cfg.mmr),
+                funding_rate_per_8h=float(run_cfg.funding_per_8h),
             )
             trades, equity_curve, stats = backtest_futures_orb(
                 df=test_sig,
@@ -396,9 +470,9 @@ def main() -> int:
                 position_size=position_size,
                 taker_fee_rate=taker_fee_rate,
                 valid_days=valid_test_days,
-                fee_mult=float(args.fee_mult),
-                slippage_bps=float(args.slippage_bps),
-                delay_bars=int(args.delay_bars),
+                fee_mult=float(run_cfg.fee_mult),
+                slippage_bps=float(run_cfg.slippage_bps),
+                delay_bars=int(run_cfg.delay_bars),
             )
 
         trades_df = pd.DataFrame(trades)
@@ -422,12 +496,12 @@ def main() -> int:
         result_params: Dict[str, Any] = {
             "adx_period": adx_period,
             "strategy_rules": serialize_signal_rules(test_rules),
-            "fee_mult": float(args.fee_mult),
-            "slippage_bps": float(args.slippage_bps),
-            "delay_bars": int(args.delay_bars),
-            "leverage": float(args.leverage),
-            "mmr": float(args.mmr),
-            "funding_per_8h": float(args.funding_per_8h),
+            "fee_mult": float(run_cfg.fee_mult),
+            "slippage_bps": float(run_cfg.slippage_bps),
+            "delay_bars": int(run_cfg.delay_bars),
+            "leverage": float(run_cfg.leverage),
+            "mmr": float(run_cfg.mmr),
+            "funding_per_8h": float(run_cfg.funding_per_8h),
         }
         if len(test_rules) == 1:
             only_rule = test_rules[0]
@@ -445,7 +519,7 @@ def main() -> int:
                     "fold_id": fold_id,
                     "symbol": symbol,
                     "timeframe": timeframe,
-                    "engine": args.engine,
+                    "engine": run_cfg.engine,
                     "window": {
                         "train_start": train_start.isoformat(),
                         "train_end": train_end.isoformat(),
@@ -540,18 +614,18 @@ def main() -> int:
             "valid_days_sha256": sha256_file(valid_days_path),
         },
         "params": {
-            "engine": args.engine,
-            "train_months": int(args.train_months),
-            "test_months": int(args.test_months),
-            "step_months": int(args.step_months),
-            "start": args.start,
-            "end": args.end,
-            "fee_mult": float(args.fee_mult),
-            "slippage_bps": float(args.slippage_bps),
-            "delay_bars": int(args.delay_bars),
-            "leverage": float(args.leverage),
-            "mmr": float(args.mmr),
-            "funding_per_8h": float(args.funding_per_8h),
+            "engine": run_cfg.engine,
+            "train_months": int(run_cfg.train_months),
+            "test_months": int(run_cfg.test_months),
+            "step_months": int(run_cfg.step_months),
+            "start": run_cfg.start,
+            "end": run_cfg.end,
+            "fee_mult": float(run_cfg.fee_mult),
+            "slippage_bps": float(run_cfg.slippage_bps),
+            "delay_bars": int(run_cfg.delay_bars),
+            "leverage": float(run_cfg.leverage),
+            "mmr": float(run_cfg.mmr),
+            "funding_per_8h": float(run_cfg.funding_per_8h),
             "adx_period": adx_period,
             "strategy_rules": serialize_signal_rules(rules),
             "tune_adx_threshold": tune_list,
@@ -567,8 +641,8 @@ def main() -> int:
     html_lines = [
         "<html><head><meta charset='utf-8'><title>Walk Forward Report</title></head><body>",
         "<h1>Walk Forward Report</h1>",
-        f"<p><b>Symbol:</b> {symbol} | <b>Timeframe:</b> {timeframe} | <b>Engine:</b> {args.engine}</p>",
-        f"<p><b>Windows:</b> train={args.train_months}m test={args.test_months}m step={args.step_months}m</p>",
+        f"<p><b>Symbol:</b> {symbol} | <b>Timeframe:</b> {timeframe} | <b>Engine:</b> {run_cfg.engine}</p>",
+        f"<p><b>Windows:</b> train={run_cfg.train_months}m test={run_cfg.test_months}m step={run_cfg.step_months}m</p>",
         f"<p><b>Folds:</b> {agg.get('folds', 0)} | <b>% positive folds:</b> {agg.get('pct_folds_positive_return', 0):.2f}%</p>",
         "<h2>Aggregate (distribution)</h2>",
         "<pre>" + stable_json(agg) + "</pre>",
@@ -582,6 +656,19 @@ def main() -> int:
     print("  - walk_forward_folds.csv")
     print("  - walk_forward_report.html")
     print("  - walk_forward_metadata.json")
+    return WalkForwardRunResult(
+        out_dir=out_dir,
+        folds_csv=summary_csv,
+        report_html=out_dir / "walk_forward_report.html",
+        metadata_json=out_dir / "walk_forward_metadata.json",
+        folds_dir=folds_dir,
+        folds=int(agg.get("folds", 0)),
+        aggregate=agg,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    run_walk_forward(parse_run_config(argv))
     return 0
 
 
